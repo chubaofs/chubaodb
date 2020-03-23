@@ -66,7 +66,7 @@ RESTful
 get/search
 create/update/upsert/delete/overwrite
 
-## master
+## Master
 
 cluster management
 
@@ -93,6 +93,10 @@ collectionName (string) -> collectionId (u32)
 
 collection schema information  (only the indexed fields) is recorded in the master and pushed into every partition.  
 
+### scheduling polices
+
+try to place partitions of different collections onto different pservers for performance isolation. 
+
 
 ## PartitionServer 
 
@@ -106,35 +110,7 @@ u64 (collectionId ## partitionId) --> Partition
 
 the core index engine - Simba, currently doc store in rocksdb + secondary/fulltext index in tantivy
 
-
-### write IO path
-
-say insert/update/upsert/delete/cwrite a document X, 
-
-1, LatchManager.latch(x.pk)
-
-2, read x from rocksdb if it is needed
-
-3, return error if not meet conditions
-
-3, submit to raft replication
-
-4, apply to rocksdb, and to tantivy
-
-5, LatchManager.release(x.pk)
-
-6, return ok
-
-
-* write performance optimization
-
-raft log on tmpfs
-
-
-### execution flow of search
-
-
-## Simba - the core indexing library
+### Simba - the core indexing library
 
 Simba has several kinds of indexes: 
 
@@ -163,5 +139,30 @@ Right now we just implement option b for simplicity
 each partition has its latch managmer, in memory, and on the leader only
 
 
+### write IO path
+
+say insert/update/upsert/delete/cwrite a document X, 
+
+1, LatchManager.latch(x.pk)
+
+2, read x from rocksdb if it is needed
+
+3, return error if not meet conditions
+
+3, submit to raft replication
+
+4, apply to rocksdb, and to tantivy
+
+5, LatchManager.release(x.pk)
+
+6, return ok
+
+
+write performance optimization: raft log on tmpfs
+
+
+## execution flow of search
+
+local merging (intra-ps) & global merging (inter-ps)
 
 
