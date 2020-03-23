@@ -1,6 +1,6 @@
 // Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
 use crate::client::meta_client::MetaClient;
-use crate::pserver::simba::simba::Simba;
+use crate::pserver::simba::simba::{Engine, Simba};
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use log::{error, info};
@@ -217,7 +217,7 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        store.clone().write(req).await?;
+        store.write(req).await?;
         make_general_success()
     }
 

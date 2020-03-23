@@ -19,6 +19,7 @@ pub const PARTITION_NO_INDEX: u16 = 508;
 pub const LOCKED_ALREADY: u16 = 514;
 pub const LOCKED_LEASE_EXPRIED: u16 = 515;
 pub const PARTITION_CAN_NOT_LOAD: u16 = 516;
+pub const FIELD_TYPE_ERR: u16 = 517;
 pub const INVALID: u16 = 599;
 pub fn http_code(code: u16) -> StatusCode {
     match StatusCode::from_u16(code) {

@@ -61,6 +61,7 @@ pub struct PS {
     pub zone_id: u32,
     pub data: String,
     pub rpc_port: u16,
+    pub flush_sleep_sec: Option<u64>,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct Master {
@@ -177,6 +178,7 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 zone_id: 0,
                 data: String::from("data/"),
                 rpc_port: 9090,
+                flush_sleep_sec: Some(3),
             },
             router: Router { http_port: 8080 },
             masters: vec![Master {

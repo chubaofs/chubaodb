@@ -24,6 +24,8 @@ zone_id = 0
 data = "data/"
 # port for server
 rpc_port = 9090
+# simba to flush data how long sleep 
+flush_sleep_sec = 3;
 
 [[masters]]
 # master ip for service
