@@ -13,14 +13,14 @@ use std::sync::{mpsc::Sender, Arc};
 #[actix_rt::main]
 pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Result<()> {
     info!(
-        "router listening on http://0.0.0.0:{}",
+        "router is listening on http://0.0.0.0:{}",
         conf.router.http_port
     );
 
     let arc_service = Arc::new(
         RouterService::new(conf.clone())
             .await
-            .expect(format!("router conn master has err",).as_str()),
+            .expect(format!("router failed to connect the master ",).as_str()),
     );
 
     HttpServer::new(move || {
@@ -46,14 +46,14 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
     .await
     .unwrap();
 
-    let _ = tx.send(String::from("router has over"));
+    let _ = tx.send(String::from("router has been over"));
 
     Ok(())
 }
 
 async fn domain() -> HttpResponse {
     HttpResponse::build(http_code(SUCCESS)).body(json!({
-        "anyindex":"router runing",
+        "chubaodb":"router is runing",
         "version":config::VERSION,
         "git_version": config::GIT_VERSION,
     }))
@@ -65,8 +65,7 @@ pub struct DocumentQuery {
     pub sort_key: Option<String>,
 }
 
-//this is a general api, post a json data, and run some command .
-//this api offten deprecated ， not use it in your application
+//this api was deprecated
 //example : {"target":["127.0.0.1:9090"] , "method":"file_info" , "path":"./"}
 async fn command(rs: web::Data<Arc<RouterService>>, bytes: web::Bytes) -> HttpResponse {
     match rs.command(bytes.to_vec()).await {
@@ -319,7 +318,7 @@ fn search_to_json(sdr: SearchDocumentResponse) -> serde_json::value::Value {
                 return json!({
                     "code": INTERNAL_ERR ,
                     "info": {
-                        "message":format!("decode document has err:{}", e.to_string())
+                        "message":format!("document decoding failed:{}", e.to_string())
                     },
                 });
             }
@@ -330,7 +329,7 @@ fn search_to_json(sdr: SearchDocumentResponse) -> serde_json::value::Value {
             Err(e) => {
                 return json!({
                     "code": INTERNAL_ERR ,
-                    "message": format!("decode source has err:{}", e.to_string()),
+                    "message": format!("source decoding failed:{}", e.to_string()),
                 });
             }
         };
@@ -372,7 +371,7 @@ fn doc_to_json(dr: DocumentResponse) -> serde_json::value::Value {
         Err(e) => {
             return json!({
                 "code": INTERNAL_ERR ,
-                "message": format!("decode document has err:{}", e.to_string()),
+                "message": format!("document decoding failed:{}", e.to_string()),
             });
         }
     };
@@ -382,7 +381,7 @@ fn doc_to_json(dr: DocumentResponse) -> serde_json::value::Value {
         Err(e) => {
             return json!({
                 "code": INTERNAL_ERR ,
-                "message": format!("decode source has err:{}", e.to_string()),
+                "message": format!("source decoding failed:{}", e.to_string()),
             });
         }
     };
