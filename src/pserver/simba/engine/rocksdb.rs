@@ -6,8 +6,6 @@ use rocksdb::{FlushOptions, WriteBatch, WriteOptions, DB};
 use std::ops::Deref;
 use std::path::Path;
 
-const SYSTEM_CF: &'static str = "_system";
-
 pub struct RocksDB {
     base: BaseEngine,
     pub db: DB,
@@ -24,17 +22,11 @@ impl Deref for RocksDB {
 impl RocksDB {
     pub fn new(base: BaseEngine) -> ASResult<RocksDB> {
         let db_path = base.base_path().join(Path::new("db"));
-
+        let sys_path = base.base_path().join(Path::new("sys"));
         let mut option = rocksdb::Options::default();
-
         option.create_if_missing(true);
-
-        let mut db = DB::open(&option, db_path.to_str().unwrap())?;
-
-        db.create_cf(SYSTEM_CF, &option)?; //TODO: has errr??????????????????
-
-        let system_db = DB::open_cf(&option, db_path.to_str().unwrap(), &[SYSTEM_CF])?;
-
+        let db = DB::open(&option, db_path.to_str().unwrap())?;
+        let system_db = DB::open(&option, sys_path.to_str().unwrap())?;
         Ok(RocksDB {
             base: base,
             db: db,

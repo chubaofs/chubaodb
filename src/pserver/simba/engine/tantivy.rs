@@ -3,7 +3,7 @@
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::pserverpb::*;
 use crate::util::error::*;
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::fs;
 use std::ops::Deref;
 use std::path::Path;
@@ -134,10 +134,8 @@ impl Tantivy {
                 .collect(),
         );
         let size = sdr.size as usize;
-
         let q = convert(query_parser.parse_query(sdr.query.as_str()))?;
         let limit = TopDocs::with_limit(size);
-
         let search_start = SystemTime::now();
         let top_docs = convert(searcher.search(&q, &limit))?;
         let mut sdr = SearchDocumentResponse {
@@ -148,24 +146,18 @@ impl Tantivy {
         };
 
         for (score, doc_address) in top_docs {
-            let retrieved_doc = convert(searcher.doc(doc_address))?;
-            if let Value::Bytes(doc) = retrieved_doc
-                .get_first(Field::from_field_id(SOURCE_INDEX))
-                .unwrap()
-            {
-                sdr.hits.push(Hit {
-                    collection_name: self.collection.get_name().to_string(),
-                    score: score,
-                    doc: doc.to_vec(),
-                });
-            } else {
-                error!(
-                    "source not found by value :{:?}",
-                    retrieved_doc
-                        .get_first(Field::from_field_id(SOURCE_INDEX))
-                        .unwrap()
-                );
-            };
+            let bytes_reader = searcher
+                .segment_reader(doc_address.0)
+                .fast_fields()
+                .bytes(Field::from_field_id(SOURCE_INDEX))
+                .unwrap();
+
+            let doc = bytes_reader.get_bytes(doc_address.1);
+            sdr.hits.push(Hit {
+                collection_name: self.collection.get_name().to_string(),
+                score: score,
+                doc: doc.to_vec(),
+            });
         }
         let search_finish = SystemTime::now();
         debug!(
@@ -189,7 +181,9 @@ impl Tantivy {
 
         let mut doc = Document::default();
         doc.add_text(Field::from_field_id(ID_INDEX), iid.as_str());
+        println!("dddddd set value");
         doc.add_bytes(Field::from_field_id(SOURCE_INDEX), value.clone());
+        println!("dddddd set value:{:?}", value);
         let schema = self.index.schema();
         for (k, v) in source.as_object().unwrap() {
             if let Some(f) = schema.get_field(k) {
