@@ -1,12 +1,13 @@
 // Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
 
+use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::pserverpb::*;
-use crate::util::{config, entity::*, error::*};
-use crate::pserver::simba::simba::Engine ;
+use crate::util::error::*;
 use log::{debug, error, info, warn};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicBool, Arc, RwLock};
+use std::ops::Deref;
+use std::path::Path;
+use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tantivy::{
     collector::TopDocs,
@@ -25,32 +26,30 @@ const SOURCE: &'static str = "_source";
 const SOURCE_INDEX: u32 = 1;
 const INDEX_DIR_NAME: &'static str = "index";
 
-pub struct Indexer {
-    collection_id: u32,
-    collection_name: String,
-    partition_id: u32,
-    _conf: Arc<config::Config>,
-    index: Arc<Index>,
-    index_writer: Arc<RwLock<IndexWriter>>,
-    index_reader: Arc<IndexReader>,
+pub struct Tantivy {
+    base: BaseEngine,
+    index: Index,
+    index_writer: RwLock<IndexWriter>,
+    index_reader: IndexReader,
     field_num: usize,
-    stoped: AtomicBool,
 }
 
-impl Indexer {
-    pub fn new(
-        conf: Arc<config::Config>,
-        base_path: PathBuf,
-        col: &Collection,
-        partition: &Partition,
-    ) -> ASResult<Arc<Indexer>> {
+impl Deref for Tantivy {
+    type Target = BaseEngine;
+    fn deref<'a>(&'a self) -> &'a BaseEngine {
+        &self.base
+    }
+}
+
+impl Tantivy {
+    pub fn new(base: BaseEngine) -> ASResult<Tantivy> {
         let now = SystemTime::now();
 
         let mut schema_builder = Schema::builder();
         schema_builder.add_text_field(ID, schema::STRING.set_stored());
         schema_builder.add_bytes_field(SOURCE);
 
-        for field in col.fields.iter().filter(|f| f.index.unwrap()) {
+        for field in base.collection.fields.iter().filter(|f| f.index.unwrap()) {
             match field.internal_type.as_ref().unwrap() {
                 crate::util::entity::FieldType::INTEGER => {
                     schema_builder.add_i64_field(
@@ -82,7 +81,7 @@ impl Indexer {
         let schema = schema_builder.build();
         let field_num = schema.fields().count();
 
-        let index_dir = base_path.join(Path::new(INDEX_DIR_NAME));
+        let index_dir = base.base_path().join(Path::new(INDEX_DIR_NAME));
         if !index_dir.exists() {
             fs::create_dir_all(&index_dir)?;
         }
@@ -102,31 +101,26 @@ impl Indexer {
             .try_into()
             .unwrap();
 
-        let indexer = Arc::new(Indexer {
-            collection_id: partition.collection_id,
-            collection_name: col.get_name().to_string(),
-            partition_id: partition.id,
-            _conf: conf,
-            index: Arc::new(index),
-            index_writer: Arc::new(RwLock::new(index_writer)),
-            index_reader: Arc::new(index_reader),
+        let tantivy = Tantivy {
+            base: base,
+            index: index,
+            index_writer: RwLock::new(index_writer),
+            index_reader: index_reader,
             field_num: field_num,
-            stoped: AtomicBool::new(false),
-        });
+        };
 
         info!(
             "init index by collection:{} partition:{} success , use time:{:?} ",
-            indexer.collection_id,
-            indexer.partition_id,
+            tantivy.collection.id.unwrap(),
+            tantivy.partition.id,
             SystemTime::now().duration_since(now).unwrap().as_millis(),
         );
 
-        Ok(indexer)
+        Ok(tantivy)
     }
 
     pub fn release(&self) {
-        self.stoped.store(true, std::sync::atomic::Ordering::SeqCst);
-        warn!("partition:{} index released", self.partition_id);
+        warn!("partition:{} index released", self.partition.id);
     }
 
     pub fn search(&self, sdr: Arc<SearchDocumentRequest>) -> ASResult<SearchDocumentResponse> {
@@ -160,7 +154,7 @@ impl Indexer {
                 .unwrap()
             {
                 sdr.hits.push(Hit {
-                    collection_name: self.collection_name.clone(),
+                    collection_name: self.collection.get_name().to_string(),
                     score: score,
                     doc: doc.to_vec(),
                 });
@@ -185,7 +179,7 @@ impl Indexer {
         Ok(sdr)
     }
 
-    pub fn write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
+    pub fn write(&self, sn: u64, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         let iid = base64::encode(key);
 
         let pbdoc: crate::pserverpb::Document =
@@ -221,38 +215,50 @@ impl Indexer {
             .unwrap()
             .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
         self.index_writer.read().unwrap().add_document(doc);
-
+        self.set_sn_if_max(sn);
         Ok(())
     }
 
-    pub fn delete(&self, key: &Vec<u8>) -> ASResult<()> {
+    pub fn delete(&self, sn: u64, key: &Vec<u8>) -> ASResult<()> {
         let iid = base64::encode(key);
         self.index_writer
             .read()
             .unwrap()
             .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
+        self.set_sn_if_max(sn);
         Ok(())
     }
 
     pub fn check_index(&self) -> ASResult<()> {
-        if self.field_num <= 1 {
+        if self.field_num <= 2 {
             return Err(err_code_str_box(PARTITION_NO_INDEX, "partition no index"));
         }
         Ok(())
     }
 }
 
-impl Engine for Indexer {
-    fn            get_sn(&self) -> u64{
-        panic!()
+impl Engine for Tantivy {
+    fn flush(&self, pre_sn: u64) -> Option<u64> {
+        let sn = self.get_sn();
+        if pre_sn > sn {
+            warn!(
+                "pre index sn is:{} , db sn is:{}  Impossible！！！！",
+                pre_sn, sn
+            );
+            return Some(pre_sn);
+        }
+        if pre_sn < sn {
+            self.index_writer.write().unwrap().commit().unwrap(); //TODO: fix err........
+            return Some(sn);
+        }
+        None
     }
-     fn set_sn_if_max(&self, sn: u64){
-        panic!()
-    }
-     fn flush(&self) -> ASResult<()>{
-        panic!()
-    }
-     fn release(&self) {
-        panic!()
+
+    fn release(&self) {
+        info!(
+            "the collection:{} , partition:{} to release",
+            self.partition.collection_id, self.partition.id
+        );
+        //TODO: need flush????????
     }
 }

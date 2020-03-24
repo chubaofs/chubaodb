@@ -1,6 +1,6 @@
 // Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
 use crate::client::meta_client::MetaClient;
-use crate::pserver::simba::simba::{Engine, Simba};
+use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use log::{error, info};
@@ -94,21 +94,26 @@ impl PartitionService {
             return Ok(());
         }
 
-        let collection = self.meta_client.get_collection_by_id(collection_id).await?;
+        let collection = Arc::new(self.meta_client.get_collection_by_id(collection_id).await?);
 
         if version > 0 {
             self.check_partition_version(collection_id, partition_id, version)
                 .await?;
         }
 
-        let partition = Partition {
+        let partition = Arc::new(Partition {
             id: partition_id,
             collection_id: collection_id,
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port),
             version: version + 1,
-        };
+        });
 
-        match Simba::new(self.conf.clone(), readonly, &collection, &partition) {
+        match Simba::new(
+            self.conf.clone(),
+            readonly,
+            collection.clone(),
+            partition.clone(),
+        ) {
             Ok(simba) => {
                 self.simba_map
                     .write()
@@ -186,19 +191,19 @@ impl PartitionService {
     pub async fn take_heartbeat(&self) -> ASResult<()> {
         let _ = self.lock.lock().unwrap();
 
-        let pids = self
+        let wps = self
             .simba_map
             .read()
             .unwrap()
             .values()
             .filter(|s| !s.readonly())
-            .map(|s| s.partition.clone())
+            .map(|s| (*s.partition).clone())
             .collect::<Vec<Partition>>();
 
         self.meta_client
             .put_pserver(&PServer {
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
-                write_partitions: pids,
+                write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
                 modify_time: 0,
             })

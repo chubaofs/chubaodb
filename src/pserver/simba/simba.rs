@@ -1,86 +1,66 @@
 // Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
-use crate::pserver::simba::indexer::Indexer;
+use crate::pserver::simba::engine::{
+    engine::{BaseEngine, Engine},
+    rocksdb::RocksDB,
+    tantivy::Tantivy,
+};
 use crate::pserver::simba::latch::Latch;
 use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::{
-    coding::{doc_id, id_coding,u64_slice, slice_u64},
+    coding::{doc_id, id_coding},
     config,
     entity::*,
     error::*,
 };
 use log::{error, info, warn};
 use prost::Message;
-use rocksdb::{FlushOptions, WriteBatch, WriteOptions, DB};
 use serde_json::Value;
-use std::path::Path;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
+    atomic::{AtomicBool, Ordering::SeqCst},
     Arc, RwLock,
 };
-use std::thread;
-
-const SYSTEM_CF: &'static str = "_system";
-
-pub trait Engine {
-    fn get_sn(&self) -> u64;
-    fn set_sn_if_max(&self, sn: u64);
-    fn flush(&self) -> ASResult<()>;
-    fn release(&self);
-}
 
 pub struct Simba {
     conf: Arc<config::Config>,
-    pub collection_id: u32,
-    pub partition: Partition,
+    _collection: Arc<Collection>,
+    pub partition: Arc<Partition>,
     readonly: bool,
     stoped: AtomicBool,
-    db: Arc<DB>,
-    system_db: DB,
-    indexer: Arc<Indexer>,
     latch: Latch,
-    max_sn: RwLock<u64>,
+    //engins
+    rocksdb: RocksDB,
+    tantivy: Tantivy,
 }
 
 impl Simba {
     pub fn new(
         conf: Arc<config::Config>,
         readonly: bool,
-        collection: &Collection,
-        partition: &Partition,
+        collection: Arc<Collection>,
+        partition: Arc<Partition>,
     ) -> ASResult<Arc<Simba>> {
-        let base_path = Path::new(&conf.ps.data)
-            .join(Path::new(format!("{}", partition.collection_id).as_str()))
-            .join(Path::new(format!("{}", partition.id).as_str()));
+        let base = BaseEngine {
+            conf: conf.clone(),
+            collection: collection.clone(),
+            partition: partition.clone(),
+            max_sn: RwLock::new(0),
+        };
 
-        let db_path = base_path.join(Path::new("db"));
+        let rocksdb = RocksDB::new(BaseEngine::new(&base))?;
+        let tantivy = Tantivy::new(BaseEngine::new(&base))?;
 
-        let mut option = rocksdb::Options::default();
-        option.create_if_missing(true);
-        option.set_max_background_flushes(16);
-        option.increase_parallelism(16);
-
-        let mut db = DB::open(&option, db_path.to_str().unwrap())?;
-
-        db.create_cf(SYSTEM_CF, &option)?; //TODO: has errr??????????????????
-
-        let system_db = DB::open_cf(&option, db_path.to_str().unwrap(), &[SYSTEM_CF])? ;
-
-        let db = Arc::new(db);
-
-        let indexer = Indexer::new(conf.clone(), base_path.clone(), collection, partition)?;
+        //TODO: read all sn . and set value
 
         let simba = Arc::new(Simba {
             conf: conf.clone(),
-            collection_id: partition.collection_id,
+            _collection: collection.clone(),
             partition: partition.clone(),
             readonly: readonly,
             stoped: AtomicBool::new(false),
-            db: db,
-            system_db:system_db,
-            indexer: indexer,
             latch: Latch::new(50000),
-            max_sn: RwLock::new(0),
+            rocksdb: rocksdb,
+            tantivy: tantivy,
         });
 
         let simba_flush = simba.clone();
@@ -110,7 +90,7 @@ impl Simba {
     }
 
     fn get_by_iid(&self, iid: &Vec<u8>) -> ASResult<Vec<u8>> {
-        match self.db.get(iid) {
+        match self.rocksdb.db.get(iid) {
             Ok(ov) => match ov {
                 Some(v) => Ok(v),
                 None => Err(err_code_str_box(NOT_FOUND, "not found!")),
@@ -121,7 +101,11 @@ impl Simba {
 
     //it use estimate
     pub fn count(&self) -> ASResult<u64> {
-        match self.db.property_int_value("rocksdb.estimate-num-keys") {
+        match self
+            .rocksdb
+            .db
+            .property_int_value("rocksdb.estimate-num-keys")
+        {
             Ok(ov) => match ov {
                 Some(v) => Ok(v),
                 None => Ok(0),
@@ -131,7 +115,7 @@ impl Simba {
     }
 
     pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
-        match self.indexer.search(sdreq) {
+        match self.tantivy.search(sdreq) {
             Ok(r) => r,
             Err(e) => {
                 let e = cast_to_err(e);
@@ -260,113 +244,58 @@ impl Simba {
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         let sn: u64 = 11111; //TODO: get raft sn
-        let mut write_options = WriteOptions::default();
-        write_options.disable_wal(true);
-        write_options.set_sync(false);
-        let mut batch = WriteBatch::default();
-        batch.put(key, value)?;
-        convert(self.db.write_opt(batch, &write_options))?;
-        self.indexer.write(key, value)?;
-        self.set_sn_if_max(sn);
+        self.rocksdb.write(sn, key, value)?;
+        self.tantivy.write(sn, key, value)?;
         Ok(())
     }
 
     async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
         let sn: u64 = 11111; //TODO: get raft sn
-        let mut write_options = WriteOptions::default();
-        write_options.disable_wal(true);
-        write_options.set_sync(false);
-        let mut batch = WriteBatch::default();
-        batch.delete(key)?;
-        convert(self.db.write_opt(batch, &write_options))?;
-        self.indexer.delete(key)?;
-        self.set_sn_if_max(sn);
+        self.rocksdb.delete(sn, key)?;
+        self.tantivy.delete(sn, key)?;
         Ok(())
     }
 
     pub fn readonly(&self) -> bool {
         return self.readonly;
     }
-
-    pub fn write_sn(&self, db_sn: u64, indexer_sn: u64) ->ASResult<()> {
-        let write_options = WriteOptions::default();
-        let mut batch = WriteBatch::default();
-        batch.put(b"db_sn", &u64_slice(db_sn)[..])?;
-        batch.put(b"indexer_sn", &u64_slice(indexer_sn)[..])?;
-        convert(self.system_db.write_opt(batch, &write_options))?;
-        Ok(())
-    }
 }
 
-impl Engine for Simba {
-    fn get_sn(&self) -> u64 {
-        *self.max_sn.read().unwrap()
-    }
-
-    fn set_sn_if_max(&self, sn: u64) {
-        let mut v = self.max_sn.write().unwrap();
-        if *v < sn {
-            *v = sn;
-        }
-    }
-
+impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
-        let mut pre_db_sn = self.get_sn();
-        let mut pre_indexer_sn = self.indexer.get_sn();
+        let mut pre_db_sn = self.rocksdb.get_sn();
+        let mut pre_tantivy_sn = self.rocksdb.get_sn();
 
         while !self.stoped.load(SeqCst) {
             sleep!(flush_time);
 
             let mut flag = false;
 
-            let db_sn = self.get_sn();
-            if pre_db_sn < db_sn {
-                let mut flush_options = FlushOptions::default();
-                flush_options.set_wait(false);
-                if let Err(e) = self.db.flush_opt(&flush_options) {
-                    error!("flush db has err :{:?}", e);
-                }
-                pre_db_sn = db_sn;
+            if let Some(sn) = self.rocksdb.flush(pre_db_sn) {
+                pre_db_sn = sn;
                 flag = true;
             }
 
-            let indexer_sn = self.indexer.get_sn();
-            if pre_indexer_sn < indexer_sn {
-                if let Err(e) = self.indexer.flush() {
-                    error!("flush indexer has err :{:?}", e);
-                }
-                pre_indexer_sn = indexer_sn;
+            if let Some(sn) = self.tantivy.flush(pre_tantivy_sn) {
+                pre_tantivy_sn = sn;
                 flag = true;
             }
 
-            if flag{
-                if let Err(e) = self.write_sn(pre_db_sn, pre_indexer_sn){
+            if flag {
+                if let Err(e) = self.rocksdb.write_sn(pre_db_sn, pre_tantivy_sn) {
                     error!("write has err :{:?}", e);
-                } ;
+                };
             }
         }
         Ok(())
     }
 
-    fn release(&self) {
+    pub fn release(&self) {
         self.stoped.store(true, SeqCst);
-        let mut flush_options = FlushOptions::default();
-        flush_options.set_wait(true);
-        if let Err(e) = self.db.flush_opt(&flush_options) {
-            error!("flush db has err:{:?}", e);
-        }
-
-        while Arc::strong_count(&self.db) > 1 {
-            info!(
-                "wait release rocksdb collection:{} partition:{} now is :{}",
-                self.collection_id,
-                self.partition.id,
-                Arc::strong_count(&self.db)
-            );
-            thread::sleep(std::time::Duration::from_millis(300));
-        }
+        self.rocksdb.release();
+        self.tantivy.release();
     }
 }
 
