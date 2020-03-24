@@ -18,14 +18,14 @@ fn main() {
                         .value_name("IP")
                         .required(false)
                         .default_value("")
-                        .help("set your local ip , if not set it will automatically discover"),
+                        .help("set your local ip , otherwise it will be automatically discovered"),
                 )
                 .arg(
                     Arg::with_name("config")
                         .short("c")
                         .value_name("CONFIG")
                         .required(true)
-                        .help("set your config file path, if default you need set it 'default'"),
+                        .help("set your config file path, or as 'default'"),
                 ),
         )
         .subcommand(
@@ -36,14 +36,14 @@ fn main() {
                         .value_name("IP")
                         .required(false)
                         .default_value("")
-                        .help("set your local ip , if not set it will automatically discover"),
+                        .help("set your local ip, otherwise it will be automatically discovered"),
                 )
                 .arg(
                     Arg::with_name("config")
                         .short("c")
                         .value_name("CONFIG")
                         .required(true)
-                        .help("set your config file path, if default you need set it 'default'"),
+                        .help("set your config file path, or as 'default'"),
                 ),
         )
         .subcommand(
@@ -52,7 +52,7 @@ fn main() {
                     .short("c")
                     .value_name("CONFIG")
                     .required(true)
-                    .help("set your config file path, if default you need set it 'default'"),
+                    .help("set your config file path, or as 'default'"),
             ),
         )
         .subcommand(
@@ -62,7 +62,7 @@ fn main() {
                     .long("config")
                     .value_name("CONFIG")
                     .default_value("config/config.toml")
-                    .help("set your config file path, if default you need set it 'default'"),
+                    .help("set your config file path, or as 'default'"),
             ),
         )
         .get_matches();
@@ -73,13 +73,13 @@ fn main() {
         Some(so) => {
             let conf_path = so
                 .value_of("config")
-                .or_else(|| panic!("not set config path , if you want test you can use default"))
+                .or_else(|| panic!("No config file path"))
                 .unwrap();
             println!("load config by path: {}", conf_path);
             util::config::load_config(conf_path, so.value_of("ip"))
         }
         None => {
-            eprintln!("not found config args so load it by default value!!!!!!!!!!!!!!!!");
+            eprintln!("No config args were found so load the default values!");
             subcommand = "all";
             let mut conf = util::config::load_config("default", None);
             conf.global.ip = String::from("127.0.0.1");
@@ -135,7 +135,7 @@ fn main() {
         _ => panic!("Subcommand {} is unknow", subcommand),
     }
 
-    info!("goodluck start all server ok! ");
+    info!("All ChubaoDB servers were started successfully!");
 
     error!("{:?}", rx.recv().unwrap());
 }
