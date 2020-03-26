@@ -1,4 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
@@ -94,21 +106,26 @@ impl PartitionService {
             return Ok(());
         }
 
-        let collection = self.meta_client.get_collection_by_id(collection_id).await?;
+        let collection = Arc::new(self.meta_client.get_collection_by_id(collection_id).await?);
 
         if version > 0 {
             self.check_partition_version(collection_id, partition_id, version)
                 .await?;
         }
 
-        let partition = Partition {
+        let partition = Arc::new(Partition {
             id: partition_id,
             collection_id: collection_id,
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port),
             version: version + 1,
-        };
+        });
 
-        match Simba::new(self.conf.clone(), readonly, &collection, &partition) {
+        match Simba::new(
+            self.conf.clone(),
+            readonly,
+            collection.clone(),
+            partition.clone(),
+        ) {
             Ok(simba) => {
                 self.simba_map
                     .write()
@@ -166,8 +183,8 @@ impl PartitionService {
             .unwrap()
             .remove(&(req.collection_id, req.partition_id))
         {
-            store.release();
-
+            store.stop();
+            crate::sleep!(300);
             while Arc::strong_count(&store) > 1 {
                 info!(
                     "wait release collection:{} partition:{} now is :{}",
@@ -175,10 +192,9 @@ impl PartitionService {
                     req.partition_id,
                     Arc::strong_count(&store)
                 );
-                thread::sleep(std::time::Duration::from_millis(300));
+                crate::sleep!(300);
             }
-
-            store.release(); // there use towice for release
+            store.release();
         }
         make_general_success()
     }
@@ -186,19 +202,19 @@ impl PartitionService {
     pub async fn take_heartbeat(&self) -> ASResult<()> {
         let _ = self.lock.lock().unwrap();
 
-        let pids = self
+        let wps = self
             .simba_map
             .read()
             .unwrap()
             .values()
             .filter(|s| !s.readonly())
-            .map(|s| s.partition.clone())
+            .map(|s| (*s.partition).clone())
             .collect::<Vec<Partition>>();
 
         self.meta_client
             .put_pserver(&PServer {
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
-                write_partitions: pids,
+                write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
                 modify_time: 0,
             })
@@ -217,54 +233,58 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        store.clone().write(req).await?;
+        store.write(req).await?;
         make_general_success()
     }
 
     pub fn get(&self, req: GetDocumentRequest) -> ASResult<DocumentResponse> {
-        if let Some(store) = self
+        let store = if let Some(store) = self
             .simba_map
             .read()
             .unwrap()
             .get(&(req.collection_id, req.partition_id))
         {
-            Ok(DocumentResponse {
-                code: SUCCESS as i32,
-                message: String::from("success"),
-                doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
-            })
+            store.clone()
         } else {
             make_not_found_err(req.collection_id, req.partition_id)?
-        }
+        };
+
+        Ok(DocumentResponse {
+            code: SUCCESS as i32,
+            message: String::from("success"),
+            doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
+        })
     }
 
     pub async fn count(&self, req: CountDocumentRequest) -> ASResult<CountDocumentResponse> {
         let mut cdr = CountDocumentResponse {
             code: SUCCESS as i32,
-            partition_count: HashMap::new(),
-            sum: 0,
+            estimate_count: 0,
+            index_count: 0,
             message: String::default(),
         };
 
         for collection_partition_id in req.cpids.iter() {
             let cpid = coding::split_u32(*collection_partition_id);
-            if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                match simba.count() {
-                    Ok(v) => {
-                        cdr.sum += v;
-                        cdr.partition_count.insert(*collection_partition_id, v);
-                    }
-                    Err(e) => {
-                        let e = cast_to_err(e);
-                        cdr.code = e.0 as i32;
-                        cdr.message.push_str(&format!(
-                            "collection_partition_id:{} has err:{}  ",
-                            collection_partition_id, e.1
-                        ));
-                    }
-                }
+            let simba = if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
+                simba.clone()
             } else {
                 return make_not_found_err(cpid.0, cpid.1);
+            };
+
+            match simba.count() {
+                Ok(v) => {
+                    cdr.estimate_count += v.0;
+                    cdr.index_count += v.1;
+                }
+                Err(e) => {
+                    let e = cast_to_err(e);
+                    cdr.code = e.0 as i32;
+                    cdr.message.push_str(&format!(
+                        "collection_partition_id:{} has err:{}  ",
+                        collection_partition_id, e.1
+                    ));
+                }
             }
         }
 
