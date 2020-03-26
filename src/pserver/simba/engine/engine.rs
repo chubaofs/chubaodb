@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use crate::util::{config, entity::*};
+use crate::util::{config, entity::*, error::ASResult};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 pub trait Engine {
-    fn flush(&self, pre_db_sn: u64) -> Option<u64>;
+    fn flush(&self) -> ASResult<()>;
     fn release(&self);
 }
 
@@ -24,7 +24,6 @@ pub struct BaseEngine {
     pub conf: Arc<config::Config>,
     pub collection: Arc<Collection>,
     pub partition: Arc<Partition>,
-    pub max_sn: RwLock<u64>,
 }
 
 impl BaseEngine {
@@ -33,18 +32,6 @@ impl BaseEngine {
             conf: base.conf.clone(),
             collection: base.collection.clone(),
             partition: base.partition.clone(),
-            max_sn: RwLock::new(0),
-        }
-    }
-
-    pub fn get_sn(&self) -> u64 {
-        *self.max_sn.read().unwrap()
-    }
-
-    pub fn set_sn_if_max(&self, sn: u64) {
-        let mut v = self.max_sn.write().unwrap();
-        if *v < sn {
-            *v = sn;
         }
     }
 

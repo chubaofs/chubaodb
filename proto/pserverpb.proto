@@ -38,10 +38,9 @@ message CountDocumentRequest { repeated uint64 cpids = 1; }
 
 message CountDocumentResponse {
   int32 code = 1;
-  // key is  merge(collection_id , partition_id)
-  map<uint64, uint64> partition_count = 2;
-  uint64 sum = 3;
-  string message = 4;
+  uint64 estimate_count = 3;
+  uint64 index_count = 4;
+  string message = 5;
 }
 
 message SearchDocumentRequest {
@@ -53,7 +52,7 @@ message SearchDocumentRequest {
 
 message SearchDocumentResponse {
   int32 code = 1;
-  int32 total = 2;
+  uint64 total = 2;
   repeated Hit hits = 3;
   SearchInfo info = 4;
 }

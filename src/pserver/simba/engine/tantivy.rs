@@ -14,14 +14,14 @@
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::pserverpb::*;
 use crate::util::error::*;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use std::fs;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tantivy::{
-    collector::TopDocs,
+    collector::{Count, MultiCollector, TopDocs},
     directory::MmapDirectory,
     query::QueryParser,
     schema,
@@ -134,6 +134,15 @@ impl Tantivy {
         warn!("partition:{} index released", self.partition.id);
     }
 
+    pub fn count(&self) -> ASResult<u64> {
+        let searcher = self.index_reader.searcher();
+        let mut sum = 0;
+        for sr in searcher.segment_readers() {
+            sum += sr.num_docs() as u64;
+        }
+        Ok(sum)
+    }
+
     pub fn search(&self, sdr: Arc<SearchDocumentRequest>) -> ASResult<SearchDocumentResponse> {
         self.check_index()?;
         let searcher = self.index_reader.searcher();
@@ -146,12 +155,19 @@ impl Tantivy {
         );
         let size = sdr.size as usize;
         let q = convert(query_parser.parse_query(sdr.query.as_str()))?;
-        let limit = TopDocs::with_limit(size);
+
+        let mut collectors = MultiCollector::new();
+        let top_docs_handle = collectors.add_collector(TopDocs::with_limit(size));
+        let count_handle = collectors.add_collector(Count);
+
         let search_start = SystemTime::now();
-        let top_docs = convert(searcher.search(&q, &limit))?;
+        let mut multi_fruit = convert(searcher.search(&q, &collectors))?;
+
+        let count = count_handle.extract(&mut multi_fruit);
+        let top_docs = top_docs_handle.extract(&mut multi_fruit);
         let mut sdr = SearchDocumentResponse {
             code: SUCCESS as i32,
-            total: 0,
+            total: count as u64,
             hits: Vec::with_capacity(size),
             info: None, //if this is none means it is success
         };
@@ -182,7 +198,7 @@ impl Tantivy {
         Ok(sdr)
     }
 
-    pub fn write(&self, sn: u64, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
+    pub fn write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         let iid = base64::encode(key);
 
         let pbdoc: crate::pserverpb::Document =
@@ -192,9 +208,7 @@ impl Tantivy {
 
         let mut doc = Document::default();
         doc.add_text(Field::from_field_id(ID_INDEX), iid.as_str());
-        println!("dddddd set value");
         doc.add_bytes(Field::from_field_id(SOURCE_INDEX), value.clone());
-        println!("dddddd set value:{:?}", value);
         let schema = self.index.schema();
         for (k, v) in source.as_object().unwrap() {
             if let Some(f) = schema.get_field(k) {
@@ -220,17 +234,15 @@ impl Tantivy {
             .unwrap()
             .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
         self.index_writer.read().unwrap().add_document(doc);
-        self.set_sn_if_max(sn);
         Ok(())
     }
 
-    pub fn delete(&self, sn: u64, key: &Vec<u8>) -> ASResult<()> {
+    pub fn delete(&self, key: &Vec<u8>) -> ASResult<()> {
         let iid = base64::encode(key);
         self.index_writer
             .read()
             .unwrap()
             .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
-        self.set_sn_if_max(sn);
         Ok(())
     }
 
@@ -243,20 +255,9 @@ impl Tantivy {
 }
 
 impl Engine for Tantivy {
-    fn flush(&self, pre_sn: u64) -> Option<u64> {
-        let sn = self.get_sn();
-        if pre_sn > sn {
-            warn!(
-                "pre index sn is:{} , db sn is:{}  Impossible！！！！",
-                pre_sn, sn
-            );
-            return Some(pre_sn);
-        }
-        if pre_sn < sn {
-            self.index_writer.write().unwrap().commit().unwrap(); //TODO: fix err........
-            return Some(sn);
-        }
-        None
+    fn flush(&self) -> ASResult<()> {
+        convert(self.index_writer.write().unwrap().commit())?;
+        Ok(())
     }
 
     fn release(&self) {
@@ -264,6 +265,8 @@ impl Engine for Tantivy {
             "the collection:{} , partition:{} to release",
             self.partition.collection_id, self.partition.id
         );
-        //TODO: need flush????????
+        if let Err(e) = self.flush() {
+            error!("flush engine has err:{:?}", e);
+        }
     }
 }

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
     rocksdb::RocksDB,
@@ -25,6 +24,7 @@ use crate::util::{
     config,
     entity::*,
     error::*,
+    time::current_millis,
 };
 use log::{error, info, warn};
 use prost::Message;
@@ -41,6 +41,7 @@ pub struct Simba {
     readonly: bool,
     stoped: AtomicBool,
     latch: Latch,
+    max_sn: RwLock<u64>,
     //engins
     rocksdb: RocksDB,
     tantivy: Tantivy,
@@ -57,14 +58,12 @@ impl Simba {
             conf: conf.clone(),
             collection: collection.clone(),
             partition: partition.clone(),
-            max_sn: RwLock::new(0),
         };
 
         let rocksdb = RocksDB::new(BaseEngine::new(&base))?;
         let tantivy = Tantivy::new(BaseEngine::new(&base))?;
 
-        //TODO: read all sn . and set value
-
+        let sn = rocksdb.read_sn()?;
         let simba = Arc::new(Simba {
             conf: conf.clone(),
             _collection: collection.clone(),
@@ -72,6 +71,7 @@ impl Simba {
             readonly: readonly,
             stoped: AtomicBool::new(false),
             latch: Latch::new(50000),
+            max_sn: RwLock::new(sn),
             rocksdb: rocksdb,
             tantivy: tantivy,
         });
@@ -112,19 +112,13 @@ impl Simba {
         }
     }
 
-    //it use estimate
-    pub fn count(&self) -> ASResult<u64> {
-        match self
-            .rocksdb
-            .db
-            .property_int_value("rocksdb.estimate-num-keys")
-        {
-            Ok(ov) => match ov {
-                Some(v) => Ok(v),
-                None => Ok(0),
-            },
-            Err(e) => Err(err_box(format!("{}", e.to_string()))),
-        }
+    //it use 1.estimate of rocksdb  2.index of u64
+    pub fn count(&self) -> ASResult<(u64, u64)> {
+        let estimate_rocksdb = self.rocksdb.count()?;
+
+        let tantivy_count = self.tantivy.count()?;
+
+        Ok((estimate_rocksdb, tantivy_count))
     }
 
     pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
@@ -256,16 +250,14 @@ impl Simba {
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        let sn: u64 = 11111; //TODO: get raft sn
-        self.rocksdb.write(sn, key, value)?;
-        self.tantivy.write(sn, key, value)?;
+        self.rocksdb.write(key, value)?;
+        self.tantivy.write(key, value)?;
         Ok(())
     }
 
     async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
-        let sn: u64 = 11111; //TODO: get raft sn
-        self.rocksdb.delete(sn, key)?;
-        self.tantivy.delete(sn, key)?;
+        self.rocksdb.delete(key)?;
+        self.tantivy.delete(key)?;
         Ok(())
     }
 
@@ -278,37 +270,57 @@ impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
-        let mut pre_db_sn = self.rocksdb.get_sn();
-        let mut pre_tantivy_sn = self.rocksdb.get_sn();
+        let mut pre_sn = self.get_sn();
 
         while !self.stoped.load(SeqCst) {
             sleep!(flush_time);
 
-            let mut flag = false;
+            let sn = self.get_sn();
 
-            if let Some(sn) = self.rocksdb.flush(pre_db_sn) {
-                pre_db_sn = sn;
-                flag = true;
+            //TODO: check pre_sn < current sn , and set
+
+            let begin = current_millis();
+
+            if let Err(e) = self.rocksdb.flush() {
+                error!("rocksdb flush has err:{:?}", e);
             }
 
-            if let Some(sn) = self.tantivy.flush(pre_tantivy_sn) {
-                pre_tantivy_sn = sn;
-                flag = true;
+            if let Err(e) = self.tantivy.flush() {
+                error!("rocksdb flush has err:{:?}", e);
             }
 
-            if flag {
-                if let Err(e) = self.rocksdb.write_sn(pre_db_sn, pre_tantivy_sn) {
-                    error!("write has err :{:?}", e);
-                };
-            }
+            pre_sn = sn;
+
+            if let Err(e) = self.rocksdb.write_sn(pre_sn) {
+                error!("write has err :{:?}", e);
+            };
+
+            info!("flush job ok use time:{}ms", current_millis() - begin);
         }
         Ok(())
     }
 
-    pub fn release(&self) {
+    pub fn stop(&self) {
         self.stoped.store(true, SeqCst);
+    }
+
+    pub fn release(&self) {
+        if !self.stoped.load(SeqCst) {
+            panic!("call release mut take stop function before");
+        }
         self.rocksdb.release();
         self.tantivy.release();
+    }
+
+    pub fn get_sn(&self) -> u64 {
+        *self.max_sn.read().unwrap()
+    }
+
+    pub fn set_sn_if_max(&self, sn: u64) {
+        let mut v = self.max_sn.write().unwrap();
+        if *v < sn {
+            *v = sn;
+        }
     }
 }
 

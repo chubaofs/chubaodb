@@ -19,7 +19,7 @@ use std::thread;
 
 fn main() {
     let app = App::new("anyindex")
-        .version("0.1.0")
+        .version(clap::crate_version!())
         .about("hello index world")
         .subcommand(
             SubCommand::with_name("all")

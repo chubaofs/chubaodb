@@ -58,7 +58,7 @@ impl MasterService {
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let _lock = self.collection_lock.lock().unwrap();
         //1.query collection
-        let c: Collection = self.meta_service.get(collection_name)?;
+        let c: Collection = self.get_collection(collection_name)?;
 
         let cid = c.id.unwrap();
         //delete collection

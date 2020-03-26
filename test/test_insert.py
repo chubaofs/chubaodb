@@ -1,14 +1,17 @@
 # #!/usr/bin/env python
 # # -*- coding:utf-8 -*-
  
+import config
+from config import *
 import time
 import requests
 import threading
 from concurrent import futures
 import random
 import json
+
+
  
-ROUTER = '127.0.0.1:8080'
 workers = 100
 mutex = threading.Lock()
 session = requests.Session()

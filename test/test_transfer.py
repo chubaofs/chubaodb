@@ -5,9 +5,8 @@ import pytest
 import requests
 import json
 import random
-
-MASTER = "11.3.146.195:443"
-ROUTER = "11.3.146.195:80"
+import config
+from config import *
 
 
 def test_del_collection():
@@ -15,7 +14,7 @@ def test_del_collection():
     response = requests.delete(url)
     print("collection_delete---\n" + response.text)
 
-    assert response.status_code == 200 or response.status_code == 509
+    assert response.status_code == 200 or response.status_code == 503
 
 
 def test_create_collection():

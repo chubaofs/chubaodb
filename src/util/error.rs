@@ -117,6 +117,20 @@ pub fn convert<T, E: ToString>(result: Result<T, E>) -> ASResult<T> {
     }
 }
 
+pub fn convert_opt<T>(opt: Option<T>) -> ASResult<T> {
+    match opt {
+        Some(t) => Ok(t),
+        None => Err(Box::from(err(String::from("value is nil")))),
+    }
+}
+
+pub fn convert_opt_by_msg<T>(opt: Option<T>, err_msg: String) -> ASResult<T> {
+    match opt {
+        Some(t) => Ok(t),
+        None => Err(Box::from(err(err_msg))),
+    }
+}
+
 pub fn cast_to_err(e: Box<dyn std::error::Error>) -> Box<GenericError> {
     match e.downcast::<GenericError>() {
         Ok(ge) => ge,

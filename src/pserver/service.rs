@@ -183,8 +183,8 @@ impl PartitionService {
             .unwrap()
             .remove(&(req.collection_id, req.partition_id))
         {
-            store.release();
-
+            store.stop();
+            crate::sleep!(300);
             while Arc::strong_count(&store) > 1 {
                 info!(
                     "wait release collection:{} partition:{} now is :{}",
@@ -192,10 +192,9 @@ impl PartitionService {
                     req.partition_id,
                     Arc::strong_count(&store)
                 );
-                thread::sleep(std::time::Duration::from_millis(300));
+                crate::sleep!(300);
             }
-
-            store.release(); // there use towice for release
+            store.release();
         }
         make_general_success()
     }
@@ -239,49 +238,53 @@ impl PartitionService {
     }
 
     pub fn get(&self, req: GetDocumentRequest) -> ASResult<DocumentResponse> {
-        if let Some(store) = self
+        let store = if let Some(store) = self
             .simba_map
             .read()
             .unwrap()
             .get(&(req.collection_id, req.partition_id))
         {
-            Ok(DocumentResponse {
-                code: SUCCESS as i32,
-                message: String::from("success"),
-                doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
-            })
+            store.clone()
         } else {
             make_not_found_err(req.collection_id, req.partition_id)?
-        }
+        };
+
+        Ok(DocumentResponse {
+            code: SUCCESS as i32,
+            message: String::from("success"),
+            doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
+        })
     }
 
     pub async fn count(&self, req: CountDocumentRequest) -> ASResult<CountDocumentResponse> {
         let mut cdr = CountDocumentResponse {
             code: SUCCESS as i32,
-            partition_count: HashMap::new(),
-            sum: 0,
+            estimate_count: 0,
+            index_count: 0,
             message: String::default(),
         };
 
         for collection_partition_id in req.cpids.iter() {
             let cpid = coding::split_u32(*collection_partition_id);
-            if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                match simba.count() {
-                    Ok(v) => {
-                        cdr.sum += v;
-                        cdr.partition_count.insert(*collection_partition_id, v);
-                    }
-                    Err(e) => {
-                        let e = cast_to_err(e);
-                        cdr.code = e.0 as i32;
-                        cdr.message.push_str(&format!(
-                            "collection_partition_id:{} has err:{}  ",
-                            collection_partition_id, e.1
-                        ));
-                    }
-                }
+            let simba = if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
+                simba.clone()
             } else {
                 return make_not_found_err(cpid.0, cpid.1);
+            };
+
+            match simba.count() {
+                Ok(v) => {
+                    cdr.estimate_count += v.0;
+                    cdr.index_count += v.1;
+                }
+                Err(e) => {
+                    let e = cast_to_err(e);
+                    cdr.code = e.0 as i32;
+                    cdr.message.push_str(&format!(
+                        "collection_partition_id:{} has err:{}  ",
+                        collection_partition_id, e.1
+                    ));
+                }
             }
         }
 

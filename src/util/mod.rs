@@ -25,25 +25,6 @@ macro_rules! sleep {
     }};
 }
 
-#[macro_export]
-macro_rules! defer {
-    {$($body:stmt;)+} => {
-        let _guard = {
-            pub struct Guard<F: FnOnce()>(Option<F>);
-            impl<F: FnOnce()> Drop for Guard<F> {
-                fn drop(&mut self) {
-                    if let Some(f) = (self.0).take() {
-                        f()
-                    }
-                }
-            }
-            Guard(Some(||{
-                $($body)+
-            }))
-        };
-    };
-}
-
 //println stack trace
 pub fn stack_trace() {
     use log::Level::Debug;

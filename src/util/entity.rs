@@ -136,8 +136,8 @@ pub fn merge_count_document_response(
     if src.code != SUCCESS as i32 {
         dist.code = src.code;
     }
-    dist.partition_count.extend(src.partition_count);
-    dist.sum += src.sum;
+    dist.estimate_count += src.estimate_count;
+    dist.index_count += src.index_count;
     if src.message.len() > 0 {
         dist.message.push_str("\n");
         dist.message.push_str(src.message.as_str());

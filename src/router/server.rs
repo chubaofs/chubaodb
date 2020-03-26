@@ -252,8 +252,8 @@ async fn count(rs: web::Data<Arc<RouterService>>, req: HttpRequest) -> HttpRespo
     match rs.count(collection_name).await {
         Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(json!({
             "code":s.code,
-            "partition_count":s.partition_count,
-            "sum":s.sum,
+            "estimate_count":s.estimate_count,
+            "index_count":s.index_count,
             "message":s.message
         })),
         Err(e) => {
