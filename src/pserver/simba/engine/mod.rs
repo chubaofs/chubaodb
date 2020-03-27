@@ -12,5 +12,6 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 pub mod engine;
+pub mod faiss;
 pub mod rocksdb;
 pub mod tantivy;
