@@ -1,5 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
-
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::util;
 use http::status::StatusCode;
 use serde_derive::{Deserialize, Serialize};
@@ -19,6 +30,7 @@ pub const PARTITION_NO_INDEX: u16 = 508;
 pub const LOCKED_ALREADY: u16 = 514;
 pub const LOCKED_LEASE_EXPRIED: u16 = 515;
 pub const PARTITION_CAN_NOT_LOAD: u16 = 516;
+pub const FIELD_TYPE_ERR: u16 = 517;
 pub const INVALID: u16 = 599;
 pub fn http_code(code: u16) -> StatusCode {
     match StatusCode::from_u16(code) {
@@ -102,6 +114,20 @@ pub fn convert<T, E: ToString>(result: Result<T, E>) -> ASResult<T> {
     match result {
         Ok(t) => Ok(t),
         Err(e) => Err(Box::from(err(e.to_string()))),
+    }
+}
+
+pub fn convert_opt<T>(opt: Option<T>) -> ASResult<T> {
+    match opt {
+        Some(t) => Ok(t),
+        None => Err(Box::from(err(String::from("value is nil")))),
+    }
+}
+
+pub fn convert_opt_by_msg<T>(opt: Option<T>, err_msg: String) -> ASResult<T> {
+    match opt {
+        Some(t) => Ok(t),
+        None => Err(Box::from(err(err_msg))),
     }
 }
 

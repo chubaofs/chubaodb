@@ -11,12 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-pub mod client;
-pub mod master;
-pub mod pserver;
-pub mod router;
-pub mod util;
-
-pub mod pserverpb {
-    tonic::include_proto!("pserverpb");
-}
+pub mod engine;
+pub mod rocksdb;
+pub mod tantivy;
