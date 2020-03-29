@@ -7,7 +7,6 @@ license = "Apache-2.0"
 edition = "2018"
 authors = ["The Chubao Authors"]
 
-
 [[bin]]
 name = "chubaodb"
 path = "src/main.rs"
@@ -33,10 +32,13 @@ base64 = "0.12.0"
 uuid = { version = "0.8", features = ["v4"] }
 rocksdb = { version = "0.13", features = ["lz4"] }
 tantivy = "0.12.0"
-faiss = "0.8.0"
-reqwest = { version = "0.10", features = ["json", "blocking"],default-features=false }
+cpp = { git = "https://github.com/mystor/rust-cpp" }
+reqwest = { version = "0.10", features = [
+    "json",
+    "blocking"
+], default-features = false }
 git-version = "0.3.4"
 
 [build-dependencies]
 tonic-build = "0.1.1"
-
+cpp_build = { git = "https://github.com/mystor/rust-cpp" }
