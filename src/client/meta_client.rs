@@ -30,9 +30,15 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn heartbeat(&self, zone_id: u32, ip: &str, port: u32) -> ASResult<PServer> {
+    pub async fn heartbeat(
+        &self,
+        zone_id: u32,
+        ps_id: Option<u64>,
+        ip: &str,
+        port: u32,
+    ) -> ASResult<PServer> {
         let url = format!("http://{}/pserver/heartbeat", self.conf.master_addr());
-        let pserver = PServer::new(zone_id, format!("{}:{}", ip, port));
+        let pserver = PServer::new(zone_id, None, format!("{}:{}", ip, port));
         http_client::post_json(&url, DEF_TIME_OUT, &pserver).await
     }
 

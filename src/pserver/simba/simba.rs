@@ -1,6 +1,7 @@
 // Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
+    raft::*,
     rocksdb::RocksDB,
     tantivy::Tantivy,
 };
@@ -9,60 +10,73 @@ use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::{
     coding::{doc_id, id_coding},
-    config,
+    config::*,
     entity::*,
     error::*,
 };
+use fp_rust::sync::CountDownLatch;
 use log::{error, info, warn};
 use prost::Message;
 use serde_json::Value;
+use std::cmp;
+use std::marker::Send;
 use std::sync::{
     atomic::{AtomicBool, Ordering::SeqCst},
     Arc, RwLock,
 };
 
 pub struct Simba {
-    conf: Arc<config::Config>,
+    pub conf: Arc<Config>,
     _collection: Arc<Collection>,
     pub partition: Arc<Partition>,
     readonly: bool,
-    stoped: AtomicBool,
+    pub started: AtomicBool,
+    writable: AtomicBool,
     latch: Latch,
     //engins
-    rocksdb: RocksDB,
-    tantivy: Tantivy,
+    pub rocksdb: Option<RocksDB>,
+    pub tantivy: Option<Tantivy>,
+    pub raft: Option<RaftEngine>,
+    pub base_engine: Arc<BaseEngine>,
+    pub server_id: u64,
+    pub start_latch: Arc<Option<CountDownLatch>>,
 }
+
+unsafe impl Send for Simba {}
 
 impl Simba {
     pub fn new(
-        conf: Arc<config::Config>,
+        conf: Arc<Config>,
         readonly: bool,
         collection: Arc<Collection>,
         partition: Arc<Partition>,
-    ) -> ASResult<Arc<Simba>> {
-        let base = BaseEngine {
+        server_id: u64,
+        latch: Arc<Option<CountDownLatch>>,
+    ) -> ASResult<Arc<RwLock<Simba>>> {
+        let base: Arc<BaseEngine> = Arc::new(BaseEngine {
             conf: conf.clone(),
             collection: collection.clone(),
             partition: partition.clone(),
             max_sn: RwLock::new(0),
-        };
-
-        let rocksdb = RocksDB::new(BaseEngine::new(&base))?;
-        let tantivy = Tantivy::new(BaseEngine::new(&base))?;
-
-        //TODO: read all sn . and set value
-
-        let simba = Arc::new(Simba {
+        });
+        let simba: Arc<RwLock<Simba>> = Arc::new(RwLock::new(Simba {
+            rocksdb: None,
+            tantivy: None,
+            raft: None,
             conf: conf.clone(),
             _collection: collection.clone(),
             partition: partition.clone(),
             readonly: readonly,
-            stoped: AtomicBool::new(false),
+            started: AtomicBool::new(true),
+            writable: AtomicBool::new(false),
             latch: Latch::new(50000),
-            rocksdb: rocksdb,
-            tantivy: tantivy,
-        });
+            base_engine: base.clone(),
+            server_id: server_id,
+            start_latch: latch.clone(),
+        }));
 
+        let raft: RaftEngine = RaftEngine::new(base.clone(), simba.clone());
+        simba.write().unwrap().raft = Some(raft);
         let simba_flush = simba.clone();
 
         tokio::spawn(async move {
@@ -71,26 +85,30 @@ impl Simba {
             }
             info!(
                 "to start commit job for partition:{} begin",
-                simba_flush.partition.id
+                simba_flush.read().unwrap().partition.id
             );
-            if let Err(e) = simba_flush.flush() {
+            if let Err(e) = simba_flush.read().unwrap().flush() {
                 panic!(format!(
                     "flush partition:{} has err :{}",
-                    simba_flush.partition.id,
+                    simba_flush.read().unwrap().partition.id,
                     e.to_string()
                 ));
             };
-            warn!("parititon:{} stop commit job", simba_flush.partition.id);
+            warn!(
+                "parititon:{} stop commit job",
+                simba_flush.read().unwrap().partition.id
+            );
         });
 
-        Ok(simba)
+        Ok(simba.clone())
     }
+
     pub fn get(&self, id: &str, sort_key: &str) -> ASResult<Vec<u8>> {
         self.get_by_iid(id_coding(id, sort_key).as_ref())
     }
 
     fn get_by_iid(&self, iid: &Vec<u8>) -> ASResult<Vec<u8>> {
-        match self.rocksdb.db.get(iid) {
+        match self.rocksdb.unwrap().db.get(iid) {
             Ok(ov) => match ov {
                 Some(v) => Ok(v),
                 None => Err(err_code_str_box(NOT_FOUND, "not found!")),
@@ -103,6 +121,7 @@ impl Simba {
     pub fn count(&self) -> ASResult<u64> {
         match self
             .rocksdb
+            .unwrap()
             .db
             .property_int_value("rocksdb.estimate-num-keys")
         {
@@ -115,7 +134,7 @@ impl Simba {
     }
 
     pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
-        match self.tantivy.search(sdreq) {
+        match self.tantivy.unwrap().search(sdreq) {
             Ok(r) => r,
             Err(e) => {
                 let e = cast_to_err(e);
@@ -243,17 +262,48 @@ impl Simba {
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        let sn: u64 = 11111; //TODO: get raft sn
-        self.rocksdb.write(sn, key, value)?;
-        self.tantivy.write(sn, key, value)?;
-        Ok(())
+        if self.check_writable() {
+            //get raft sn
+            let sn: u64 = self.raft.as_ref().unwrap().get_sn();
+            self.rocksdb.as_ref().unwrap().write(sn, key, value)?;
+            self.tantivy.as_ref().unwrap().write(sn, key, value)?;
+            let latch = CountDownLatch::new(1);
+            self.raft.as_ref().unwrap().append(
+                PutEvent {
+                    k: key.to_vec(),
+                    v: value.to_vec(),
+                },
+                WriteRaftCallback { latch: latch },
+            );
+            latch.wait();
+            Ok(())
+        } else {
+            Err(err_code_str_box(ENGINE_NOT_WRITABLE, "engin not writable!"))
+        }
     }
 
     async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
-        let sn: u64 = 11111; //TODO: get raft sn
-        self.rocksdb.delete(sn, key)?;
-        self.tantivy.delete(sn, key)?;
-        Ok(())
+        if self.check_writable() {
+            let mut sn: u64 = self.raft.as_ref().unwrap().get_sn();
+            if sn == 0 {
+                sn = cmp::min(
+                    self.rocksdb.as_ref().unwrap().get_sn(),
+                    self.tantivy.as_ref().unwrap().get_sn(),
+                );
+            }
+            self.rocksdb.as_ref().unwrap().delete(sn, key)?;
+            self.tantivy.as_ref().unwrap().delete(sn, key)?;
+            let latch = CountDownLatch::new(1);
+            self.raft.as_ref().unwrap().append(
+                DelEvent { k: key.to_vec() },
+                WriteRaftCallback { latch: latch },
+            );
+            latch.wait();
+
+            Ok(())
+        } else {
+            Err(err_code_str_box(ENGINE_NOT_WRITABLE, "engin not writable!"))
+        }
     }
 
     pub fn readonly(&self) -> bool {
@@ -261,41 +311,110 @@ impl Simba {
     }
 }
 
+pub struct WriteRaftCallback {
+    pub latch: CountDownLatch,
+}
+impl AppendCallback for WriteRaftCallback {
+    fn call(&self) {
+        self.latch.countdown();
+    }
+}
+
 impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
-        let mut pre_db_sn = self.rocksdb.get_sn();
-        let mut pre_tantivy_sn = self.rocksdb.get_sn();
-
-        while !self.stoped.load(SeqCst) {
+        let mut pre_db_sn = self.rocksdb.as_ref().unwrap().get_sn();
+        let mut pre_tantivy_sn = self.rocksdb.as_ref().unwrap().get_sn();
+        loop {
+            if self.check_writable() {
+                sleep!(flush_time);
+                let mut flag = false;
+                if let Some(sn) = self.rocksdb.as_ref().unwrap().flush(pre_db_sn) {
+                    pre_db_sn = sn;
+                    flag = true;
+                }
+                if let Some(sn) = self.tantivy.as_ref().unwrap().flush(pre_tantivy_sn) {
+                    pre_tantivy_sn = sn;
+                    flag = true;
+                }
+                if flag {
+                    if let Err(e) = self
+                        .rocksdb
+                        .as_ref()
+                        .unwrap()
+                        .write_sn(pre_db_sn, pre_tantivy_sn)
+                    {
+                        error!("write has err :{:?}", e);
+                    };
+                }
+            }
             sleep!(flush_time);
-
-            let mut flag = false;
-
-            if let Some(sn) = self.rocksdb.flush(pre_db_sn) {
-                pre_db_sn = sn;
-                flag = true;
-            }
-
-            if let Some(sn) = self.tantivy.flush(pre_tantivy_sn) {
-                pre_tantivy_sn = sn;
-                flag = true;
-            }
-
-            if flag {
-                if let Err(e) = self.rocksdb.write_sn(pre_db_sn, pre_tantivy_sn) {
-                    error!("write has err :{:?}", e);
-                };
-            }
         }
         Ok(())
     }
 
     pub fn release(&self) {
-        self.stoped.store(true, SeqCst);
-        self.rocksdb.release();
-        self.tantivy.release();
+        self.started.store(false, SeqCst);
+        self.raft.as_ref().unwrap().release();
+        self.offload_engine();
+    }
+
+    pub fn role_change(self, is_leader: bool) {
+        if self.started.load(SeqCst) {
+            let _lock = self.latch.latch_lock(u32::max_value());
+
+            if is_leader {
+                self.load_engine();
+            } else {
+                self.offload_engine();
+            }
+            if self.start_latch.is_some() {
+                self.start_latch.as_ref().unwrap().countdown();
+            }
+        }
+    }
+    fn offload_engine(&self) {
+        self.writable.store(false, SeqCst);
+        self.rocksdb.as_ref().unwrap().release();
+        self.tantivy.as_ref().unwrap().release();
+    }
+
+    fn load_engine(&self) {
+        let rocksdb = RocksDB::new(BaseEngine::new(&self.base_engine)).unwrap();
+        let tantivy = Tantivy::new(BaseEngine::new(&self.base_engine)).unwrap();
+        let log_start_index = cmp::min(rocksdb.get_sn(), tantivy.get_sn());
+
+        //TODO load log and restore
+        //self.raft.unwrap().read();
+        let data: Vec<u8> = vec![0, 0, 0, 0];
+        let log_index = 0;
+        if data.len() > 0 {
+            match LogEvent::to_event(data) {
+                Ok(event) => match event.get_type() {
+                    EventType::Delete => {
+                        let del = DelEvent {
+                            k: vec![0, 0, 0, 0],
+                        }; //event as Box<DelEvent>;
+                        rocksdb.delete(log_index, &del.k.clone());
+                        tantivy.delete(log_index, &del.k.clone());
+                    }
+                    EventType::Put => {
+                        // let put = event as Box<PutEvent>;
+                        // rocksdb.write(log_index, &put.k.clone(), &put.v.clone());
+                        // tantivy.write(log_index, &put.k.clone(), &put.v.clone());
+                    }
+                },
+                Err(e) => print!("error"),
+            }
+        }
+        self.rocksdb = Some(rocksdb);
+        self.tantivy = Some(tantivy);
+        self.writable.store(true, SeqCst);
+    }
+
+    pub fn check_writable(&self) -> bool {
+        self.started.load(SeqCst) && !self.writable.load(SeqCst)
     }
 }
 

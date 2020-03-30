@@ -39,6 +39,7 @@ pub struct Collection {
     #[serde(default)]
     pub fields: Vec<Field>,
     pub partition_num: Option<u32>,
+    pub partition_replica_num: Option<u32>,
     pub partitions: Option<Vec<u32>>,
     pub slots: Option<Vec<u32>>,
     pub status: Option<CollectionStatus>,
@@ -61,6 +62,19 @@ pub struct Partition {
     pub collection_id: u32,
     pub leader: String,
     pub version: u64,
+    pub replicas: Vec<Replica>,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Replica {
+    pub node: u64,
+    pub peer: u64,
+    pub replica_type: ReplicaType,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ReplicaType {
+    NORMAL = 0,  //normal type
+    LEARNER = 1, //learner type
 }
 
 impl Partition {
@@ -75,6 +89,7 @@ impl Partition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PServer {
+    pub id: Option<u64>,
     pub addr: String,
     #[serde(default)]
     pub write_partitions: Vec<Partition>,
@@ -84,8 +99,9 @@ pub struct PServer {
 }
 
 impl PServer {
-    pub fn new(zone_id: u32, addr: String) -> Self {
+    pub fn new(zone_id: u32, id: Option<u64>, addr: String) -> Self {
         PServer {
+            id: id,
             zone_id: zone_id,
             write_partitions: Vec::default(),
             addr: addr,

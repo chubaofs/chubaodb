@@ -8,8 +8,11 @@ use crate::sleep;
 use crate::util::time::*;
 use crate::util::{coding, config::Config, entity::*, error::*};
 use log::{error, info, warn};
+use std::cmp;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
+extern crate rand;
+use rand::Rng;
 
 pub struct MasterService {
     ps_cli: PsClient,
@@ -103,14 +106,14 @@ impl MasterService {
         collection.status = Some(CollectionStatus::CREATING);
         collection.modify_time = Some(current_millis());
 
-        //let zones = &collection.zones;
-        let need_num = collection.partition_num.unwrap();
+        let partition_num = collection.partition_num.unwrap();
+        let partition_replica_num = collection.partition_replica_num.unwrap();
 
-        // TODO default zone ID
         let server_list: Vec<PServer> = self
             .meta_service
             .list(entity_key::pserver_prefix().as_str())?;
 
+        let need_num = cmp::max(partition_num, partition_replica_num);
         if need_num as usize > server_list.len() {
             return Err(Box::from(err(format!(
                 "need pserver size:{} but all server is:{}",
@@ -119,8 +122,12 @@ impl MasterService {
             ))));
         }
         let mut use_list: Vec<PServer> = Vec::new();
+        let random = rand::thread_rng().gen_range(0, server_list.len());
         //from list_server find need_num for use
-        for s in server_list.iter() {
+        let mut index = random % server_list.len();
+        let mut detected_times = 1;
+        loop {
+            let s = server_list.get(index).unwrap();
             let ok = match self.ps_cli.status(s.addr.as_str()).await {
                 Ok(gr) => match gr.code as u16 {
                     ENGINE_WILL_CLOSE => false,
@@ -135,26 +142,50 @@ impl MasterService {
                 continue;
             }
             use_list.push(s.clone());
-            if use_list.len() >= need_num as usize {
+            if use_list.len() >= need_num as usize || detected_times >= server_list.len() {
                 break;
             }
+            index += 1;
+            detected_times += 1;
         }
 
-        let mut partitions = Vec::with_capacity(need_num as usize);
-        let mut pids = Vec::with_capacity(need_num as usize);
-        let mut slots = Vec::with_capacity(need_num as usize);
-        let range = u32::max_value() / need_num;
+        if need_num as usize > use_list.len() {
+            return Err(Box::from(err(format!(
+                "need pserver size:{} but available server is:{}",
+                need_num,
+                use_list.len()
+            ))));
+        }
 
+        let mut partitions = Vec::with_capacity(partition_num as usize);
+        let mut pids = Vec::with_capacity(partition_num as usize);
+        let mut slots = Vec::with_capacity(partition_num as usize);
+        let range = u32::max_value() / partition_num;
         for i in 0..need_num {
             let server = use_list.get(i as usize).unwrap();
             pids.push(i);
             slots.push(i * range);
+            let mut replicas: Vec<Replica> = Vec::new();
+            for j in 0..partition_replica_num {
+                let id = use_list
+                    .get((i + j % need_num) as usize)
+                    .unwrap()
+                    .id
+                    .unwrap();
+                replicas.push(Replica {
+                    node: id,
+                    peer: current_millis(),
+                    replica_type: ReplicaType::NORMAL,
+                });
+            }
             let partition = Partition {
                 id: i,
                 collection_id: seq,
                 leader: server.addr.to_string(),
                 version: 0,
+                replicas: replicas,
             };
+
             partitions.push(partition.clone());
         }
 
@@ -167,12 +198,21 @@ impl MasterService {
         self.meta_service.create(&collection)?;
 
         for c in partitions {
+            let mut replicas: Vec<ReplicaInfo> = vec![];
+            for r in c.replicas {
+                replicas.push(ReplicaInfo {
+                    node: r.node,
+                    peer: r.peer,
+                    replica_type: r.replica_type as u32,
+                });
+            }
             PartitionClient::new(c.leader)
                 .load_or_create_partition(PartitionRequest {
                     partition_id: c.id,
                     collection_id: c.collection_id,
                     readonly: false,
                     version: 0,
+                    replicas: replicas,
                 })
                 .await?;
         }
@@ -356,6 +396,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await
     }
@@ -375,6 +416,7 @@ impl MasterService {
                             partition_id: partition_id,
                             readonly: false,
                             version: version,
+                            replicas: vec![],
                         })
                         .await?;
                 }
@@ -389,6 +431,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await?;
 
@@ -458,15 +501,4 @@ fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
     }
 
     None
-}
-
-#[test]
-fn test_json_schema() {
-    let collection_schema = "{\"name\": \"t1\",\"partition_num\": 1,\"replica_num\": 1,\"fields\": [{\"name\": \"name\", \"type\": \"string\", \"index\": true, \"store\": true, \"array\": false }, { \"name\": \"age\", \"type\": \"int\", \"index\": true, \"store\": true, \"array\": false } ]}";
-    let collection_value: serde_json::value::Value = serde_json::from_str(collection_schema)
-        .expect(format!("collection to json has err:{}", collection_schema).as_str());
-    match collection_value.get("name") {
-        Some(s) => info!("{}", s.as_str().unwrap()),
-        None => panic!("not found"),
-    }
 }

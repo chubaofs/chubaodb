@@ -56,13 +56,32 @@ fn default_log_file_count() -> usize {
 pub struct Router {
     pub http_port: u16,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RaftServerOps {
+    pub node_id: Option<u64>,
+    pub tick_interval: u64,
+    pub election_tick: u64,
+    pub transport_inprocess_use: bool,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct PS {
+    pub id: Option<u64>,
     pub zone_id: u32,
     pub data: String,
     pub rpc_port: u16,
     pub flush_sleep_sec: Option<u64>,
+    pub raft: RaftOps,
+    pub rs: RaftServerOps,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RaftOps {
+    pub use_memoray_storage: bool,
+    pub storage_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Master {
     pub ip: String,
@@ -175,10 +194,21 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 log_file_count: default_log_file_count(),
             },
             ps: PS {
+                id: None,
                 zone_id: 0,
                 data: String::from("data/"),
                 rpc_port: 9090,
                 flush_sleep_sec: Some(3),
+                raft: RaftOps {
+                    use_memoray_storage: true,
+                    storage_path: Some(String::from("data/raft/")),
+                },
+                rs: RaftServerOps {
+                    node_id: None,
+                    tick_interval: 100,
+                    election_tick: 5,
+                    transport_inprocess_use: true,
+                },
             },
             router: Router { http_port: 8080 },
             masters: vec![Master {

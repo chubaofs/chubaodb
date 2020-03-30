@@ -4,6 +4,7 @@ use crate::pserverpb::{
     rpc_server::{Rpc, RpcServer},
     *,
 };
+use crate::util::entity::*;
 use crate::util::{config, error::*};
 use log::{error, info};
 use std::error::Error;
@@ -36,7 +37,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), 
 
     let conf = Arc::new(config);
 
-    let ps = PartitionService::new(conf.clone());
+    let mut ps = PartitionService::new(conf.clone());
 
     let now = time::SystemTime::now();
     while let Err(err) = ps.init().await {
@@ -177,13 +178,27 @@ impl Rpc for RPCService {
         let req = request.into_inner();
         info!("Start server load_or_create_partition");
 
+        let mut replicas: Vec<Replica> = vec![];
+        for rep in req.replicas {
+            let mut replica_type: ReplicaType = ReplicaType::NORMAL;
+            if rep.replica_type == 1 {
+                replica_type = ReplicaType::LEARNER;
+            }
+            replicas.push(Replica {
+                node: rep.node,
+                peer: rep.peer,
+                replica_type: replica_type,
+            });
+        }
         let mut result = match self
             .service
             .init_partition(
                 req.collection_id,
                 req.partition_id,
+                replicas,
                 req.readonly,
                 req.version,
+                true,
             )
             .await
         {

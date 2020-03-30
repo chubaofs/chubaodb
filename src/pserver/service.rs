@@ -3,14 +3,15 @@ use crate::client::meta_client::MetaClient;
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
+use fp_rust::sync::CountDownLatch;
 use log::{error, info};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
-
 pub struct PartitionService {
-    pub simba_map: RwLock<HashMap<(u32, u32), Arc<Simba>>>,
+    pub server_id: u64,
+    pub simba_map: RwLock<HashMap<(u32, u32), Arc<RwLock<Simba>>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,
@@ -19,6 +20,7 @@ pub struct PartitionService {
 impl PartitionService {
     pub fn new(conf: Arc<config::Config>) -> Self {
         PartitionService {
+            server_id: 0,
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
@@ -26,11 +28,12 @@ impl PartitionService {
         }
     }
 
-    pub async fn init(&self) -> ASResult<()> {
+    pub async fn init(&mut self) -> ASResult<()> {
         let ps = match self
             .meta_client
             .heartbeat(
                 self.conf.ps.zone_id as u32,
+                None,
                 self.conf.global.ip.as_str(),
                 self.conf.ps.rpc_port as u32,
             )
@@ -44,16 +47,26 @@ impl PartitionService {
                 }
                 PServer::new(
                     self.conf.ps.zone_id,
+                    None,
                     format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 )
             }
         };
 
+        self.server_id = ps.id.unwrap();
+
         info!("get_server line:{:?}", ps);
 
         for wp in ps.write_partitions {
             if let Err(err) = self
-                .init_partition(wp.collection_id, wp.id, false, wp.version)
+                .init_partition(
+                    wp.collection_id,
+                    wp.id,
+                    wp.replicas,
+                    false,
+                    wp.version,
+                    false,
+                )
                 .await
             {
                 error!("init partition has err:{}", err.to_string());
@@ -69,8 +82,10 @@ impl PartitionService {
         &self,
         collection_id: u32,
         partition_id: u32,
+        replicas: Vec<Replica>,
         readonly: bool,
         version: u64,
+        wait_for_success: bool,
     ) -> ASResult<()> {
         info!(
             "to load partition:{} partition:{} exisit:{}",
@@ -104,15 +119,22 @@ impl PartitionService {
         let partition = Arc::new(Partition {
             id: partition_id,
             collection_id: collection_id,
+            replicas: replicas,
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port),
             version: version + 1,
         });
 
+        let mut latch: Arc<Option<CountDownLatch>> = Arc::new(None);
+        if wait_for_success {
+            latch = Arc::new(Some(CountDownLatch::new(1)));
+        }
         match Simba::new(
             self.conf.clone(),
             readonly,
             collection.clone(),
             partition.clone(),
+            self.server_id,
+            latch.clone(),
         ) {
             Ok(simba) => {
                 self.simba_map
@@ -123,11 +145,16 @@ impl PartitionService {
             Err(e) => return Err(e),
         };
 
+        if latch.is_some() {
+            latch.as_ref().as_ref().unwrap().wait();
+        }
+
         if let Err(e) = self.meta_client.update_partition(&partition).await {
             //if notify master errr, it will rollback
             if let Err(offe) = self.offload_partition(PartitionRequest {
                 partition_id: partition.id,
                 collection_id: partition.collection_id,
+                replicas: vec![],
                 readonly: false,
                 version: 0,
             }) {
@@ -171,7 +198,7 @@ impl PartitionService {
             .unwrap()
             .remove(&(req.collection_id, req.partition_id))
         {
-            store.release();
+            store.write().unwrap().release();
 
             while Arc::strong_count(&store) > 1 {
                 info!(
@@ -183,7 +210,7 @@ impl PartitionService {
                 thread::sleep(std::time::Duration::from_millis(300));
             }
 
-            store.release(); // there use towice for release
+            store.write().unwrap().release(); // there use towice for release
         }
         make_general_success()
     }
@@ -196,12 +223,13 @@ impl PartitionService {
             .read()
             .unwrap()
             .values()
-            .filter(|s| !s.readonly())
-            .map(|s| (*s.partition).clone())
+            .filter(|s| !s.read().unwrap().readonly())
+            .map(|s| (*s.read().unwrap().partition).clone())
             .collect::<Vec<Partition>>();
 
         self.meta_client
             .put_pserver(&PServer {
+                id: None,
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
@@ -222,7 +250,7 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        store.write(req).await?;
+        store.read().unwrap().write(req).await?;
         make_general_success()
     }
 
@@ -236,7 +264,10 @@ impl PartitionService {
             Ok(DocumentResponse {
                 code: SUCCESS as i32,
                 message: String::from("success"),
-                doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
+                doc: store
+                    .read()
+                    .unwrap()
+                    .get(req.id.as_str(), req.sort_key.as_str())?,
             })
         } else {
             make_not_found_err(req.collection_id, req.partition_id)?
@@ -254,7 +285,7 @@ impl PartitionService {
         for collection_partition_id in req.cpids.iter() {
             let cpid = coding::split_u32(*collection_partition_id);
             if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                match simba.count() {
+                match simba.read().unwrap().count() {
                     Ok(v) => {
                         cdr.sum += v;
                         cdr.partition_count.insert(*collection_partition_id, v);
@@ -289,7 +320,7 @@ impl PartitionService {
                 let tx = tx.clone();
                 let sdreq = sdreq.clone();
                 thread::spawn(move || {
-                    tx.send(simba.search(sdreq)).unwrap();
+                    tx.send(simba.read().unwrap().search(sdreq)).unwrap();
                 });
             } else {
                 return make_not_found_err(cpid.0, cpid.1);

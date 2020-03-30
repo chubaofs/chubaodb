@@ -96,12 +96,19 @@ message WriteDocumentRequest {
   WriteType write_type = 4;
 }
 
+message ReplicaInfo{
+  uint64 node =1;
+  uint64 peer =2;
+  uint32 replica_type =3;
+}
+
 message PartitionRequest {
   uint32 partition_id = 1;
   uint32 collection_id = 2;
   bool readonly = 3;
   // if version ==0 not check version .
   uint64 version = 4;
+  repeated ReplicaInfo replicas = 5;
 }
 
 message StatsResponse {
