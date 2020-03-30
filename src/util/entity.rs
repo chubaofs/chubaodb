@@ -1,5 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
-
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::pserverpb::*;
 use crate::util::error::*;
 use crate::util::time::*;
@@ -141,8 +152,8 @@ pub fn merge_count_document_response(
     if src.code != SUCCESS as i32 {
         dist.code = src.code;
     }
-    dist.partition_count.extend(src.partition_count);
-    dist.sum += src.sum;
+    dist.estimate_count += src.estimate_count;
+    dist.index_count += src.index_count;
     if src.message.len() > 0 {
         dist.message.push_str("\n");
         dist.message.push_str(src.message.as_str());

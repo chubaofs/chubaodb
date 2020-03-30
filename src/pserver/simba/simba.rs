@@ -1,4 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
     raft::*,
@@ -13,6 +25,7 @@ use crate::util::{
     config::*,
     entity::*,
     error::*,
+    time::current_millis,
 };
 use fp_rust::sync::CountDownLatch;
 use log::{error, info, warn};
@@ -35,6 +48,7 @@ pub struct Simba {
     pub started: AtomicBool,
     writable: AtomicBool,
     latch: Latch,
+    max_sn: RwLock<u64>,
     //engins
     pub rocksdb: Option<RocksDB>,
     pub tantivy: Option<Tantivy>,
@@ -43,8 +57,6 @@ pub struct Simba {
     pub server_id: u64,
     pub start_latch: Arc<Option<CountDownLatch>>,
 }
-
-unsafe impl Send for Simba {}
 
 impl Simba {
     pub fn new(
@@ -59,7 +71,6 @@ impl Simba {
             conf: conf.clone(),
             collection: collection.clone(),
             partition: partition.clone(),
-            max_sn: RwLock::new(0),
         });
         let simba: Arc<RwLock<Simba>> = Arc::new(RwLock::new(Simba {
             rocksdb: None,
@@ -119,21 +130,13 @@ impl Simba {
         }
     }
 
-    //it use estimate
-    pub fn count(&self) -> ASResult<u64> {
-        match self
-            .rocksdb
-            .as_ref()
-            .unwrap()
-            .db
-            .property_int_value("rocksdb.estimate-num-keys")
-        {
-            Ok(ov) => match ov {
-                Some(v) => Ok(v),
-                None => Ok(0),
-            },
-            Err(e) => Err(err_box(format!("{}", e.to_string()))),
-        }
+    //it use 1.estimate of rocksdb  2.index of u64
+    pub fn count(&self) -> ASResult<(u64, u64)> {
+        let estimate_rocksdb = self.rocksdb.count()?;
+
+        let tantivy_count = self.tantivy.count()?;
+
+        Ok((estimate_rocksdb, tantivy_count))
     }
 
     pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
@@ -264,12 +267,10 @@ impl Simba {
         self.do_write(&iid, &buf1)
     }
 
-    fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
+     fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         if self.check_writable() {
-            //get raft sn
-            let sn: u64 = self.raft.as_ref().unwrap().get_sn();
-            self.rocksdb.as_ref().unwrap().write(sn, key, value)?;
-            self.tantivy.as_ref().unwrap().write(sn, key, value)?;
+        self.rocksdb.write(key, value)?;
+        self.tantivy.write(key, value)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
                 PutEvent {
@@ -287,17 +288,10 @@ impl Simba {
         }
     }
 
-    fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
+    async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
         if self.check_writable() {
-            let mut sn: u64 = self.raft.as_ref().unwrap().get_sn();
-            if sn == 0 {
-                sn = cmp::min(
-                    self.rocksdb.as_ref().unwrap().get_sn(),
-                    self.tantivy.as_ref().unwrap().get_sn(),
-                );
-            }
-            self.rocksdb.as_ref().unwrap().delete(sn, key)?;
-            self.tantivy.as_ref().unwrap().delete(sn, key)?;
+        self.rocksdb.delete(key)?;
+        self.tantivy.delete(key)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
                 DelEvent { k: key.to_vec() },
@@ -311,6 +305,7 @@ impl Simba {
         } else {
             Err(err_code_str_box(ENGINE_NOT_WRITABLE, "engin not writable!"))
         }
+
     }
 
     pub fn readonly(&self) -> bool {
@@ -335,35 +330,40 @@ impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
-        let mut pre_db_sn = self.rocksdb.as_ref().unwrap().get_sn();
-        let mut pre_tantivy_sn = self.rocksdb.as_ref().unwrap().get_sn();
-        loop {
-            if self.check_writable() {
-                sleep!(flush_time);
-                let mut flag = false;
-                if let Some(sn) = self.rocksdb.as_ref().unwrap().flush(pre_db_sn) {
-                    pre_db_sn = sn;
-                    flag = true;
-                }
-                if let Some(sn) = self.tantivy.as_ref().unwrap().flush(pre_tantivy_sn) {
-                    pre_tantivy_sn = sn;
-                    flag = true;
-                }
-                if flag {
-                    if let Err(e) = self
-                        .rocksdb
-                        .as_ref()
-                        .unwrap()
-                        .write_sn(pre_db_sn, pre_tantivy_sn)
-                    {
-                        error!("write has err :{:?}", e);
-                    };
-                }
-            }
+        let mut pre_sn = self.get_sn();
+
+        while !self.stoped.load(SeqCst) {
             sleep!(flush_time);
+
+            let sn = self.get_sn();
+
+            //TODO: check pre_sn < current sn , and set
+
+            let begin = current_millis();
+
+            if let Err(e) = self.rocksdb.flush() {
+                error!("rocksdb flush has err:{:?}", e);
+            }
+
+            if let Err(e) = self.tantivy.flush() {
+                error!("rocksdb flush has err:{:?}", e);
+            }
+
+            pre_sn = sn;
+
+            if let Err(e) = self.rocksdb.write_sn(pre_sn) {
+                error!("write has err :{:?}", e);
+            };
+
+            info!("flush job ok use time:{}ms", current_millis() - begin);
         }
         Ok(())
     }
+
+    pub fn stop(&self) {
+        self.stoped.store(true, SeqCst);
+    }
+
 
     pub fn release(&self) {
         self.started.store(false, SeqCst);
@@ -444,6 +444,17 @@ impl Simba {
             Err(e) => {
                 error!("begin read log error:[{}]", e);
             }
+        }
+    }
+
+    pub fn get_sn(&self) -> u64 {
+        *self.max_sn.read().unwrap()
+    }
+
+    pub fn set_sn_if_max(&self, sn: u64) {
+        let mut v = self.max_sn.write().unwrap();
+        if *v < sn {
+            *v = sn;
         }
     }
 }
