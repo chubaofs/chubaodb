@@ -152,22 +152,22 @@ impl Simba {
         }
     }
 
-    pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<()> {
+    pub fn write(&self, req: WriteDocumentRequest) -> ASResult<()> {
         let (doc, write_type) = (req.doc.unwrap(), WriteType::from_i32(req.write_type));
 
         match write_type {
-            Some(WriteType::Overwrite) => self._overwrite(doc).await,
-            Some(WriteType::Create) => self._overwrite(doc).await,
-            Some(WriteType::Update) => self._update(doc).await,
-            Some(WriteType::Upsert) => self._upsert(doc).await,
-            Some(WriteType::Delete) => self._delete(doc).await,
+            Some(WriteType::Overwrite) => self._overwrite(doc),
+            Some(WriteType::Create) => self._overwrite(doc),
+            Some(WriteType::Update) => self._update(doc),
+            Some(WriteType::Upsert) => self._upsert(doc),
+            Some(WriteType::Delete) => self._delete(doc),
             Some(_) | None => {
                 return Err(err_box(format!("can not do the handler:{:?}", write_type)));
             }
         }
     }
 
-    async fn _create(&self, mut doc: Document) -> ASResult<()> {
+    fn _create(&self, mut doc: Document) -> ASResult<()> {
         let iid = doc_id(&doc);
         doc.version = 1;
         let mut buf1 = Vec::new();
@@ -186,10 +186,10 @@ impl Simba {
             return Err(err_box(format!("the document:{:?} already exists", iid)));
         }
 
-        self.do_write(&iid, &buf1).await
+        self.do_write(&iid, &buf1)
     }
 
-    async fn _update(&self, mut doc: Document) -> ASResult<()> {
+    fn _update(&self, mut doc: Document) -> ASResult<()> {
         let (old_version, iid) = (doc.version, doc_id(&doc));
 
         let _lock = self.latch.latch_lock(doc.slot);
@@ -211,10 +211,10 @@ impl Simba {
             return Err(error.into());
         }
 
-        self.do_write(&iid, &buf1).await
+        self.do_write(&iid, &buf1)
     }
 
-    async fn _upsert(&self, mut doc: Document) -> ASResult<()> {
+    fn _upsert(&self, mut doc: Document) -> ASResult<()> {
         let iid = doc_id(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
         let old = match self.get_by_iid(iid.as_ref()) {
@@ -241,16 +241,16 @@ impl Simba {
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
-        self.do_write(&iid, &buf1).await
+        self.do_write(&iid, &buf1)
     }
 
-    async fn _delete(&self, doc: Document) -> ASResult<()> {
+    fn _delete(&self, doc: Document) -> ASResult<()> {
         let iid = doc_id(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_delete(&iid).await
+        self.do_delete(&iid)
     }
 
-    async fn _overwrite(&self, mut doc: Document) -> ASResult<()> {
+    fn _overwrite(&self, mut doc: Document) -> ASResult<()> {
         let iid = doc_id(&doc);
         let mut buf1 = Vec::new();
         doc.version = 1;
@@ -258,10 +258,10 @@ impl Simba {
             return Err(error.into());
         }
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_write(&iid, &buf1).await
+        self.do_write(&iid, &buf1)
     }
 
-    async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
+    fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         if self.check_writable() {
             //get raft sn
             let sn: u64 = self.raft.as_ref().unwrap().get_sn();

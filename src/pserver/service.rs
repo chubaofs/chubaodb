@@ -250,7 +250,7 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        store.read().unwrap().write(req).await?;
+        store.read().unwrap().write(req);
         make_general_success()
     }
 
@@ -308,46 +308,47 @@ impl PartitionService {
     }
 
     pub async fn search(&self, sdreq: SearchDocumentRequest) -> ASResult<SearchDocumentResponse> {
-        assert_ne!(sdreq.cpids.len(), 0);
-        let (tx, rx) = mpsc::channel();
+        panic!(".....");
+        // assert_ne!(sdreq.cpids.len(), 0);
+        // let (tx, rx) = mpsc::channel();
 
-        let sdreq = Arc::new(sdreq);
+        // let sdreq = Arc::new(sdreq);
 
-        for cpid in sdreq.cpids.iter() {
-            let cpid = coding::split_u32(*cpid);
-            if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                let simba = simba.clone();
-                let tx = tx.clone();
-                let sdreq = sdreq.clone();
-                thread::spawn(move || {
-                    tx.send(simba.read().unwrap().search(sdreq)).unwrap();
-                });
-            } else {
-                return make_not_found_err(cpid.0, cpid.1);
-            }
-        }
+        // for cpid in sdreq.cpids.iter() {
+        //     let cpid = coding::split_u32(*cpid);
+        //     if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
+        //         let simba = simba.clone();
+        //         let tx = tx.clone();
+        //         let sdreq = sdreq.clone();
+        //         thread::spawn(move || {
+        //             tx.send(simba.read().unwrap().search(sdreq)).unwrap();
+        //         });
+        //     } else {
+        //         return make_not_found_err(cpid.0, cpid.1);
+        //     }
+        // }
 
-        empty(tx);
+        // empty(tx);
 
-        let mut dist = rx.recv()?;
-        for src in rx {
-            dist = merge_search_document_response(dist, src);
-        }
-        dist.hits.sort_by(|v1, v2| {
-            if v1.score >= v2.score {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Greater
-            }
-        });
+        // let mut dist = rx.recv()?;
+        // for src in rx {
+        //     dist = merge_search_document_response(dist, src);
+        // }
+        // dist.hits.sort_by(|v1, v2| {
+        //     if v1.score >= v2.score {
+        //         std::cmp::Ordering::Less
+        //     } else {
+        //         std::cmp::Ordering::Greater
+        //     }
+        // });
 
-        if dist.hits.len() > sdreq.size as usize {
-            unsafe {
-                dist.hits.set_len(sdreq.size as usize);
-            }
-        }
+        // if dist.hits.len() > sdreq.size as usize {
+        //     unsafe {
+        //         dist.hits.set_len(sdreq.size as usize);
+        //     }
+        // }
 
-        Ok(dist)
+        // Ok(dist)
     }
 
     pub fn status(&self, _request: GeneralRequest) -> ASResult<GeneralResponse> {
