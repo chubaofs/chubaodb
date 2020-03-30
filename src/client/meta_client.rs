@@ -81,4 +81,14 @@ impl MetaClient {
 
         http_client::get_json(&url, DEF_TIME_OUT).await
     }
+
+    pub async fn get_server_addr_by_id(&self, server_id: u64) -> ASResult<String> {
+        let url = format!(
+            "http://{}/pserver/get_by_id/{}",
+            self.conf.master_addr(),
+            server_id,
+        );
+        //TODO
+        http_client::get_json(&url, DEF_TIME_OUT).await
+    }
 }

@@ -5,10 +5,12 @@ use crate::util::{coding::*, config, entity::*, error::*};
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::util::entity::Partition;
 use jimraft::{
-    error::RResult, CmdResult, ConfigChange, Peer, PeerType, Raft, RaftOptions, RaftServer,
-    RaftServerOptions, Snapshot, StateMachine, StateMachineCallback,
+    error::RResult, raft::LogReader, CmdResult, ConfigChange, NodeResolver, NodeResolverCallback,
+    Peer, PeerType, Raft, RaftOptions, RaftServer, RaftServerOptions, Snapshot, StateMachine,
+    StateMachineCallback,
 };
 
+use crate::client::meta_client::MetaClient;
 use log::{error, info, warn};
 use std::boxed::Box;
 use std::mem;
@@ -57,9 +59,11 @@ impl RaftEngine {
         Ok(())
     }
 
-    pub fn read(&self) -> ASResult<Vec<u8>> {
-        //TODO
-        Ok(vec![1, 1, 1, 1])
+    pub fn begin_read_log(&self, start_index: u64) -> ASResult<LogReader> {
+        match self.raft.begin_read_log(start_index) {
+            Ok(logger) => return Ok(logger),
+            Err(e) => return Err(err_str_box("get raft logger error")),
+        }
     }
 
     // fetch raft log entries since start_index
@@ -238,30 +242,48 @@ impl StateMachine for SimpleStateMachine {
     }
 }
 
+pub struct SimpleNodeResolver {
+    pub meta_client: Arc<MetaClient>,
+}
+
+impl SimpleNodeResolver {
+    pub fn new(conf: Arc<config::Config>) -> Self {
+        Self {
+            meta_client: Arc::new(MetaClient::new(conf)),
+        }
+    }
+}
+use futures::executor::block_on;
+impl NodeResolver for SimpleNodeResolver {
+    fn get_node_address(&self, node_id: u64) -> RResult<String> {
+        match block_on(self.meta_client.get_server_addr_by_id(node_id)) {
+            Ok(addr) => Ok(addr),
+            Err(_) => Err(jimraft::error::err_str(
+                &format!("get node address error,node id[{}] ", node_id).as_str(),
+            )),
+        }
+    }
+}
+
 fn create_raft_server(conf: Arc<config::Config>, node_id: u64) -> RaftServer {
     let server_ops: RaftServerOptions = RaftServerOptions::new();
+    let nr_callback: NodeResolverCallback = NodeResolverCallback {
+        target: Box::new(SimpleNodeResolver::new(conf.clone())),
+    };
+
+    server_ops.set_node_resolver(nr_callback);
     server_ops.set_node_id(node_id);
     server_ops.set_tick_interval(conf.ps.rs.tick_interval);
     server_ops.set_election_tick(conf.ps.rs.election_tick);
     server_ops.set_transport_inprocess_use(conf.ps.rs.transport_inprocess_use);
-    //TODO set NodeResolver
-    let server: RaftServer = RaftServer::new(server_ops);
-    server
-}
-
-fn query_node(zone_id: u64, addr: String) -> u64 {
-    //TODO
-    1
+    RaftServer::new(server_ops)
 }
 
 fn create_raft(simba: Arc<RwLock<Simba>>, base: Arc<BaseEngine>, node_id: u64) -> Arc<Raft> {
     let partition = simba.read().unwrap().partition.clone();
     let conf = simba.read().unwrap().conf.clone();
     let options = RaftOptions::new();
-    options.set_id(generate_raft_id(partition.collection_id, partition.id));
-    options.set_use_memoray_storage(true);
     let (current_peer_id, peers) = create_peers(&partition, node_id);
-    options.set_peers(peers);
     let callback: StateMachineCallback = StateMachineCallback {
         target: Box::new(SimpleStateMachine {
             engine: base.clone(),
@@ -270,6 +292,12 @@ fn create_raft(simba: Arc<RwLock<Simba>>, base: Arc<BaseEngine>, node_id: u64) -
             peer_id: current_peer_id,
         }),
     };
+
+    options.set_id(generate_raft_id(partition.collection_id, partition.id));
+    options.set_peers(peers);
+    options.set_state_machine(callback);
+    options.set_use_memoray_storage(true);
+
     let raft_server: Arc<RaftServer> = RaftServerFactory::get_instance(conf.clone(), node_id);
     let raft: Raft = raft_server.create_raft(&options).unwrap();
     Arc::new(raft)
