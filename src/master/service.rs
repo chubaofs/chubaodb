@@ -1,4 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::client::partition_client::PartitionClient;
 use crate::client::ps_client::PsClient;
 use crate::master::cmd::*;
@@ -46,7 +58,7 @@ impl MasterService {
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let _lock = self.collection_lock.lock().unwrap();
         //1.query collection
-        let c: Collection = self.meta_service.get(collection_name)?;
+        let c: Collection = self.get_collection(collection_name)?;
 
         let cid = c.id.unwrap();
         //delete collection

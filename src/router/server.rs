@@ -1,5 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
-
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::pserverpb::*;
 use crate::router::service::RouterService;
 use crate::util::{config, error::*};
@@ -241,8 +252,8 @@ async fn count(rs: web::Data<Arc<RouterService>>, req: HttpRequest) -> HttpRespo
     match rs.count(collection_name).await {
         Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(json!({
             "code":s.code,
-            "partition_count":s.partition_count,
-            "sum":s.sum,
+            "estimate_count":s.estimate_count,
+            "index_count":s.index_count,
             "message":s.message
         })),
         Err(e) => {
