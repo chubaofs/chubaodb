@@ -439,10 +439,11 @@ fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
 
     match field.field_type.as_ref() {
         Some(v) => match v.as_str() {
-            "text" => field.internal_type = Some(FieldType::TEXT),
-            "string" => field.internal_type = Some(FieldType::STRING),
-            "integer" => field.internal_type = Some(FieldType::INTEGER),
-            "double" => field.internal_type = Some(FieldType::DOUBLE),
+            "text" => field.internal_type = FieldType::TEXT,
+            "string" => field.internal_type = FieldType::STRING,
+            "integer" => field.internal_type = FieldType::INTEGER,
+            "double" => field.internal_type = FieldType::DOUBLE,
+            "vector" => field.internal_type = FieldType::VECTOR,
             _ => {
                 return Some(err(format!(
                     "unknow field:{} type:{}",
@@ -458,16 +459,6 @@ fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
             )));
         }
     };
-
-    if field.index.is_none() {
-        field.index = Some(true);
-    }
-    if field.array.is_none() {
-        field.array = Some(false);
-    }
-    if field.store.is_none() {
-        field.store = Some(true);
-    }
 
     None
 }

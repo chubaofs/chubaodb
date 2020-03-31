@@ -60,8 +60,8 @@ impl Tantivy {
         schema_builder.add_text_field(ID, schema::STRING.set_stored());
         schema_builder.add_bytes_field(SOURCE);
 
-        for field in base.collection.fields.iter().filter(|f| f.index.unwrap()) {
-            match field.internal_type.as_ref().unwrap() {
+        for field in base.collection.fields.iter() {
+            match field.internal_type {
                 crate::util::entity::FieldType::INTEGER => {
                     schema_builder.add_i64_field(
                         field.name.as_ref().unwrap(),
@@ -80,6 +80,7 @@ impl Tantivy {
                 crate::util::entity::FieldType::TEXT => {
                     schema_builder.add_text_field(field.name.as_ref().unwrap(), schema::TEXT);
                 }
+                crate::util::entity::FieldType::VECTOR => {}
                 _ => {
                     return Err(err_box(format!(
                         "thie type:[{}] can not make index",

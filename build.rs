@@ -13,9 +13,5 @@
 // permissions and limitations under the License.
 
 fn main() {
-    println!("cargo:rustc-link-lib=dylib=omp");
-    println!("cargo:rustc-link-lib=dylib=faiss");
-    cpp_build::Config::new().build("src/pserver/simba/engine/faiss.rs");
-
-    // tonic_build::compile_protos("proto/pserverpb.proto").unwrap();
+    tonic_build::compile_protos("proto/pserverpb.proto").unwrap();
 }

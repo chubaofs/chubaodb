@@ -15,24 +15,31 @@ use crate::pserverpb::*;
 use crate::util::error::*;
 use crate::util::time::*;
 use serde_derive::{Deserialize, Serialize};
+use serde_json::Value;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum FieldType {
     UNKNOW = 0,
     STRING = 1,
     INTEGER = 2,
     DOUBLE = 3,
     TEXT = 4,
+    VECTOR = 5,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Field {
     pub name: Option<String>,
     pub field_type: Option<String>,
-    pub array: Option<bool>,
-    pub index: Option<bool>,
-    pub store: Option<bool>,
-    pub internal_type: Option<FieldType>,
+    #[serde(default)]
+    pub array: bool,
+    pub option: Option<Value>,
+    #[serde(default = "def_field_type")]
+    pub internal_type: FieldType,
+}
+
+fn def_field_type() -> FieldType {
+    FieldType::UNKNOW
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

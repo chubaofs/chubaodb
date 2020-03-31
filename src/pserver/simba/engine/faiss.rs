@@ -1,33 +1,17 @@
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
-use crate::util::error::*;
-use cpp::cpp;
+use crate::util::{entity::*, error::*};
+use faiss4rs::*;
+use std::collections::HashMap;
 use std::ops::Deref;
 
-cpp! {{
-    #include <iostream>
-
-    #include <cmath>
-    #include <cstdio>
-    #include <cstdlib>
-
-    #include <sys/time.h>
-
-
-    #include <faiss/IndexPQ.h>
-    #include <faiss/IndexIVFFlat.h>
-    #include <faiss/IndexFlat.h>
-    #include <faiss/index_io.h>
-
-    double elapsed ()
-    {
-        struct timeval tv;
-        gettimeofday (&tv, nullptr);
-        return  tv.tv_sec + tv.tv_usec * 1e-6;
-    }
-}}
+struct IndexField {
+    field: Field,
+    index: IndexIVFFlat,
+}
 
 pub struct Faiss {
     base: BaseEngine,
+    fields: HashMap<String, IndexField>,
 }
 
 impl Deref for Faiss {
@@ -39,19 +23,24 @@ impl Deref for Faiss {
 
 impl Faiss {
     pub fn new(base: BaseEngine) -> ASResult<Faiss> {
-        unsafe {
-            cpp!([]{
-                int d = 128;
-                size_t nb = 1000 * 1000;
-                size_t nt = 100 * 1000;
-                size_t nhash = 2;
-                size_t nbits_subq = int (log2 (nb+1) / 2);        // good choice in general
-                size_t ncentroids = 1 << (nhash * nbits_subq);  // total # of centroids
-                faiss::MultiIndexQuantizer coarse_quantizer (d, nhash, nbits_subq);
-            });
-        }
+        let mut faiss = Faiss {
+            base: base,
+            fields: HashMap::new(),
+        };
+        for f in faiss.base.collection.fields.iter() {
+            if f.internal_type == FieldType::VECTOR {
+                let dimension = f.get_option_value("dimension");
 
-        Ok(Faiss { base: base })
+                faiss.fields.insert(
+                    f.name.as_ref().unwrap().to_string(),
+                    IndexField {
+                        field: f.clone(),
+                        index: IndexIVFFlat::new(),
+                    },
+                );
+            }
+        }
+        Ok(faiss)
     }
 }
 
