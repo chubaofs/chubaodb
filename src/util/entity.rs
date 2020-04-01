@@ -14,8 +14,9 @@
 use crate::pserverpb::*;
 use crate::util::error::*;
 use crate::util::time::*;
+use serde::de::DeserializeOwned;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum FieldType {
@@ -27,15 +28,43 @@ pub enum FieldType {
     VECTOR = 5,
 }
 
+//about field option
+pub mod field_option {
+    pub const DIMENSION: &'static str = "dimension"; //i32
+    pub const TRAIN_SIZE: &'static str = "train_size"; //usize
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Field {
     pub name: Option<String>,
     pub field_type: Option<String>,
     #[serde(default)]
     pub array: bool,
-    pub option: Option<Value>,
+    #[serde(default = "def_json_value")]
+    pub option: Value,
     #[serde(default = "def_field_type")]
     pub internal_type: FieldType,
+}
+
+impl Field {
+    pub fn get_option_value<T: DeserializeOwned>(&self, name: &str) -> ASResult<T> {
+        if let Some(v) = self.option.get(name) {
+            convert(serde_json::from_value(v.clone()))
+        } else {
+            Err(err_code_box(
+                NOT_FOUND,
+                format!(
+                    "not found field:{} in {}'s option",
+                    name,
+                    self.name.as_ref().unwrap()
+                ),
+            ))
+        }
+    }
+}
+
+fn def_json_value() -> Value {
+    json!({})
 }
 
 fn def_field_type() -> FieldType {
@@ -61,6 +90,8 @@ pub struct Collection {
     pub slots: Option<Vec<u32>>,
     pub status: Option<CollectionStatus>,
     pub modify_time: Option<u64>,
+    #[serde(default)] //target has vector field
+    pub vector: bool,
 }
 
 impl Collection {

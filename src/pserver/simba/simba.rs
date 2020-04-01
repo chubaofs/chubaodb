@@ -13,6 +13,7 @@
 // permissions and limitations under the License.
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
+    faiss::Faiss,
     rocksdb::RocksDB,
     tantivy::Tantivy,
 };
@@ -20,7 +21,7 @@ use crate::pserver::simba::latch::Latch;
 use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::{
-    coding::{doc_id, id_coding},
+    coding::{doc_key, field_coding, iid_coding, key_coding, slice_slice},
     config,
     entity::*,
     error::*,
@@ -28,6 +29,7 @@ use crate::util::{
 };
 use log::{error, info, warn};
 use prost::Message;
+use rocksdb::WriteBatch;
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering::SeqCst},
@@ -35,16 +37,15 @@ use std::sync::{
 };
 
 pub struct Simba {
-    conf: Arc<config::Config>,
-    _collection: Arc<Collection>,
-    pub partition: Arc<Partition>,
+    pub base: Arc<BaseEngine>,
     readonly: bool,
     stoped: AtomicBool,
     latch: Latch,
     max_sn: RwLock<u64>,
     //engins
-    rocksdb: RocksDB,
+    rocksdb: Arc<RocksDB>,
     tantivy: Tantivy,
+    faiss: Faiss,
 }
 
 impl Simba {
@@ -54,26 +55,26 @@ impl Simba {
         collection: Arc<Collection>,
         partition: Arc<Partition>,
     ) -> ASResult<Arc<Simba>> {
-        let base = BaseEngine {
+        let base = Arc::new(BaseEngine {
             conf: conf.clone(),
             collection: collection.clone(),
             partition: partition.clone(),
-        };
+        });
 
-        let rocksdb = RocksDB::new(BaseEngine::new(&base))?;
-        let tantivy = Tantivy::new(BaseEngine::new(&base))?;
+        let rocksdb = RocksDB::new(base.clone())?;
+        let tantivy = Tantivy::new(base.clone())?;
+        let faiss = Faiss::new(base.clone())?;
 
         let sn = rocksdb.read_sn()?;
         let simba = Arc::new(Simba {
-            conf: conf.clone(),
-            _collection: collection.clone(),
-            partition: partition.clone(),
+            base: base,
             readonly: readonly,
             stoped: AtomicBool::new(false),
             latch: Latch::new(50000),
             max_sn: RwLock::new(sn),
-            rocksdb: rocksdb,
+            rocksdb: Arc::new(rocksdb),
             tantivy: tantivy,
+            faiss: faiss,
         });
 
         let simba_flush = simba.clone();
@@ -84,31 +85,42 @@ impl Simba {
             }
             info!(
                 "to start commit job for partition:{} begin",
-                simba_flush.partition.id
+                simba_flush.base.partition.id
             );
             if let Err(e) = simba_flush.flush() {
                 panic!(format!(
                     "flush partition:{} has err :{}",
-                    simba_flush.partition.id,
+                    simba_flush.base.partition.id,
                     e.to_string()
                 ));
             };
-            warn!("parititon:{} stop commit job", simba_flush.partition.id);
+            warn!(
+                "parititon:{} stop commit job",
+                simba_flush.base.partition.id
+            );
         });
 
         Ok(simba)
     }
     pub fn get(&self, id: &str, sort_key: &str) -> ASResult<Vec<u8>> {
-        self.get_by_iid(id_coding(id, sort_key).as_ref())
+        self.get_by_key(key_coding(id, sort_key).as_ref())
     }
 
-    fn get_by_iid(&self, iid: &Vec<u8>) -> ASResult<Vec<u8>> {
+    fn get_by_key(&self, key: &Vec<u8>) -> ASResult<Vec<u8>> {
+        let iid = match self.rocksdb.db.get(key) {
+            Ok(ov) => match ov {
+                Some(v) => v,
+                None => return Err(err_code_box(NOT_FOUND, format!("id:{:?} not found!", key))),
+            },
+            Err(e) => return Err(err_box(format!("get key has err:{}", e.to_string()))),
+        };
+
         match self.rocksdb.db.get(iid) {
             Ok(ov) => match ov {
                 Some(v) => Ok(v),
-                None => Err(err_code_str_box(NOT_FOUND, "not found!")),
+                None => Err(err_code_str_box(NOT_FOUND, "iid not found!")),
             },
-            Err(e) => Err(err_box(format!("get key has err:{}", e.to_string()))),
+            Err(e) => Err(err_box(format!("get iid has err:{}", e.to_string()))),
         }
     }
 
@@ -156,7 +168,7 @@ impl Simba {
     }
 
     async fn _create(&self, mut doc: Document) -> ASResult<()> {
-        let iid = doc_id(&doc);
+        let key = doc_key(&doc);
         doc.version = 1;
         let mut buf1 = Vec::new();
         if let Err(error) = doc.encode(&mut buf1) {
@@ -165,20 +177,20 @@ impl Simba {
 
         let _lock = self.latch.latch_lock(doc.slot);
 
-        if let Err(e) = self.get_by_iid(&iid) {
+        if let Err(e) = self.get_by_key(&key) {
             let e = cast_to_err(e);
             if e.0 != NOT_FOUND {
                 return Err(e);
             }
         } else {
-            return Err(err_box(format!("the document:{:?} already exists", iid)));
+            return Err(err_box(format!("the document:{:?} already exists", key)));
         }
 
-        self.do_write(&iid, &buf1).await
+        self.do_write(&key, &buf1).await
     }
 
     async fn _update(&self, mut doc: Document) -> ASResult<()> {
-        let (old_version, iid) = (doc.version, doc_id(&doc));
+        let (old_version, key) = (doc.version, doc_key(&doc));
 
         let _lock = self.latch.latch_lock(doc.slot);
         let old = self.get(doc.id.as_str(), doc.sort_key.as_str())?;
@@ -199,13 +211,13 @@ impl Simba {
             return Err(error.into());
         }
 
-        self.do_write(&iid, &buf1).await
+        self.do_write(&key, &buf1).await
     }
 
     async fn _upsert(&self, mut doc: Document) -> ASResult<()> {
-        let iid = doc_id(&doc);
+        let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        let old = match self.get_by_iid(iid.as_ref()) {
+        let old = match self.get_by_key(key.as_ref()) {
             Ok(o) => Some(o),
             Err(e) => {
                 let e = cast_to_err(e);
@@ -229,29 +241,68 @@ impl Simba {
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
-        self.do_write(&iid, &buf1).await
+        self.do_write(&key, &buf1).await
     }
 
     async fn _delete(&self, doc: Document) -> ASResult<()> {
-        let iid = doc_id(&doc);
+        let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_delete(&iid).await
+        self.do_delete(&key).await
     }
 
     async fn _overwrite(&self, mut doc: Document) -> ASResult<()> {
-        let iid = doc_id(&doc);
+        let key = doc_key(&doc);
         let mut buf1 = Vec::new();
         doc.version = 1;
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_write(&iid, &buf1).await
+        self.do_write(&key, &buf1).await
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        self.rocksdb.write(key, value)?;
-        self.tantivy.write(key, value)?;
+        //general iid .......
+        let general_id = 123;
+
+        let iid = iid_coding(general_id);
+
+        let mut batch = WriteBatch::default();
+        batch.put(key, &iid)?;
+
+        if self.base.collection.fields.len() == 0 {
+            batch.put(iid, value)?;
+            return self.rocksdb.write_batch(batch);
+        }
+
+        let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
+        let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+
+        if self.base.collection.vector {
+            let map = source.as_object_mut().unwrap();
+            for f in self.base.collection.fields.iter() {
+                match f.internal_type {
+                    FieldType::VECTOR => {
+                        let field_name: &str = f.name.as_ref().unwrap();
+                        if let Some(v) = map.remove(field_name) {
+                            let index = self.faiss.get_field(field_name)?;
+                            let vector: Vec<f32> = serde_json::from_value(v)?;
+                            if index.validate(&vector)? {
+                                //start train job.....
+                            }
+                            batch
+                                .put(field_coding(general_id, field_name), slice_slice(&vector))?;
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            pbdoc.source = serde_json::to_vec(&source)?;
+        }
+
+        batch.put(iid, value)?;
+        self.rocksdb.write_batch(batch)?;
+
         Ok(())
     }
 
@@ -268,7 +319,7 @@ impl Simba {
 
 impl Simba {
     fn flush(&self) -> ASResult<()> {
-        let flush_time = self.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
+        let flush_time = self.base.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
         let mut pre_sn = self.get_sn();
 

@@ -208,7 +208,7 @@ impl PartitionService {
             .unwrap()
             .values()
             .filter(|s| !s.readonly())
-            .map(|s| (*s.partition).clone())
+            .map(|s| (*s.base.partition).clone())
             .collect::<Vec<Partition>>();
 
         self.meta_client

@@ -20,6 +20,7 @@ use crate::sleep;
 use crate::util::time::*;
 use crate::util::{coding, config::Config, entity::*, error::*};
 use log::{error, info, warn};
+use serde_json::json;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 
@@ -103,10 +104,12 @@ impl MasterService {
         let seq = self.meta_service.increase_id(entity_key::SEQ_COLLECTION)?;
 
         info!("no coresponding collection found, begin to create connection ");
+        let mut vector = false;
         if collection.fields.len() > 0 {
             for f in collection.get_mut_fields().iter_mut() {
-                if let Some(e) = validate_and_set_field(f) {
-                    return Err(Box::new(e));
+                validate_and_set_field(f)?;
+                if f.internal_type == FieldType::VECTOR {
+                    vector = true;
                 }
             }
         }
@@ -114,6 +117,7 @@ impl MasterService {
         collection.id = Some(seq);
         collection.status = Some(CollectionStatus::CREATING);
         collection.modify_time = Some(current_millis());
+        collection.vector = vector;
 
         //let zones = &collection.zones;
         let need_num = collection.partition_num.unwrap();
@@ -432,9 +436,9 @@ impl MasterService {
     }
 }
 
-fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
+fn validate_and_set_field(field: &mut Field) -> ASResult<()> {
     if field.name.is_none() {
-        return Some(err(format!("unset field name in field:{:?}", field)));
+        return Err(err_box(format!("unset field name in field:{:?}", field)));
     }
 
     match field.field_type.as_ref() {
@@ -443,9 +447,19 @@ fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
             "string" => field.internal_type = FieldType::STRING,
             "integer" => field.internal_type = FieldType::INTEGER,
             "double" => field.internal_type = FieldType::DOUBLE,
-            "vector" => field.internal_type = FieldType::VECTOR,
+            "vector" => {
+                //here is validate type is ok , and must param and some default param
+                field.internal_type = FieldType::VECTOR;
+                let _: i32 = field.get_option_value(field_option::DIMENSION)?;
+
+                let map = field.option.as_object_mut().unwrap();
+
+                if map.get(field_option::TRAIN_SIZE).is_none() {
+                    map.insert(field_option::TRAIN_SIZE.to_string(), json!(20000));
+                }
+            }
             _ => {
-                return Some(err(format!(
+                return Err(err_box(format!(
                     "unknow field:{} type:{}",
                     field.name.as_ref().unwrap(),
                     v
@@ -453,14 +467,14 @@ fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
             }
         },
         None => {
-            return Some(err(format!(
+            return Err(err_box(format!(
                 "the field:{} must set type",
                 field.name.as_ref().unwrap()
             )));
         }
     };
 
-    None
+    Ok(())
 }
 
 #[test]

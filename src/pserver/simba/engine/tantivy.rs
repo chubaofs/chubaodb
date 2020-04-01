@@ -38,7 +38,7 @@ const SOURCE_INDEX: u32 = 1;
 const INDEX_DIR_NAME: &'static str = "index";
 
 pub struct Tantivy {
-    base: BaseEngine,
+    base: Arc<BaseEngine>,
     index: Index,
     index_writer: RwLock<IndexWriter>,
     index_reader: IndexReader,
@@ -46,14 +46,14 @@ pub struct Tantivy {
 }
 
 impl Deref for Tantivy {
-    type Target = BaseEngine;
-    fn deref<'a>(&'a self) -> &'a BaseEngine {
+    type Target = Arc<BaseEngine>;
+    fn deref<'a>(&'a self) -> &'a Arc<BaseEngine> {
         &self.base
     }
 }
 
 impl Tantivy {
-    pub fn new(base: BaseEngine) -> ASResult<Tantivy> {
+    pub fn new(base: Arc<BaseEngine>) -> ASResult<Tantivy> {
         let now = SystemTime::now();
 
         let mut schema_builder = Schema::builder();

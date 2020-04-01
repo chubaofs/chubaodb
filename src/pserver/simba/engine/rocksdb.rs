@@ -13,30 +13,29 @@
 // permissions and limitations under the License.
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::util::{
-    coding::{slice_u64, u64_slice},
+    coding::{slice_u64, u64_slice, SN_KEY},
     error::*,
 };
 use log::{error, info};
 use rocksdb::{FlushOptions, WriteBatch, WriteOptions, DB};
 use std::ops::Deref;
 use std::path::Path;
-
-const SN_KEY: &'static [u8] = b"____sn";
+use std::sync::Arc;
 
 pub struct RocksDB {
-    base: BaseEngine,
+    base: Arc<BaseEngine>,
     pub db: DB,
 }
 
 impl Deref for RocksDB {
-    type Target = BaseEngine;
-    fn deref<'a>(&'a self) -> &'a BaseEngine {
+    type Target = Arc<BaseEngine>;
+    fn deref<'a>(&'a self) -> &'a Arc<BaseEngine> {
         &self.base
     }
 }
 
 impl RocksDB {
-    pub fn new(base: BaseEngine) -> ASResult<RocksDB> {
+    pub fn new(base: Arc<BaseEngine>) -> ASResult<RocksDB> {
         let db_path = base.base_path().join(Path::new("db"));
         let mut option = rocksdb::Options::default();
         option.create_if_missing(true);
@@ -50,6 +49,14 @@ impl RocksDB {
         write_options.set_sync(false);
         let mut batch = WriteBatch::default();
         batch.put(key, value)?;
+        convert(self.db.write_opt(batch, &write_options))?;
+        Ok(())
+    }
+
+    pub fn write_batch(&self, batch: WriteBatch) -> ASResult<()> {
+        let mut write_options = WriteOptions::default();
+        write_options.disable_wal(true);
+        write_options.set_sync(false);
         convert(self.db.write_opt(batch, &write_options))?;
         Ok(())
     }
