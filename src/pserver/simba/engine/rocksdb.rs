@@ -17,7 +17,7 @@ use crate::util::{
     error::*,
 };
 use log::{error, info};
-use rocksdb::{FlushOptions, WriteBatch, WriteOptions, DB};
+use rocksdb::{Direction, FlushOptions, IteratorMode, WriteBatch, WriteOptions, DB};
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
@@ -91,6 +91,25 @@ impl RocksDB {
             Some(bs) => Ok(slice_u64(bs.as_slice())),
             None => Ok(0),
         }
+    }
+
+    // query rocksdb range key ,  the range key > prefix , end  ,
+    pub fn prefix_range(
+        &self,
+        prefix: Vec<u8>,
+        mut f: impl FnMut(&[u8], &[u8]) -> ASResult<bool>,
+    ) -> ASResult<()> {
+        let iter = self
+            .db
+            .iterator(IteratorMode::From(&prefix, Direction::Forward)); // From a key in Direction::{forward,reverse}
+
+        for (k, v) in iter {
+            if !f(&*k, &*v)? {
+                break;
+            }
+        }
+
+        Ok(())
     }
 }
 

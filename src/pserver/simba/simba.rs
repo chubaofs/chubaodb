@@ -39,7 +39,6 @@ use std::sync::{
 pub struct Simba {
     pub base: Arc<BaseEngine>,
     readonly: bool,
-    stoped: AtomicBool,
     latch: Latch,
     max_sn: RwLock<u64>,
     //engins
@@ -59,6 +58,7 @@ impl Simba {
             conf: conf.clone(),
             collection: collection.clone(),
             partition: partition.clone(),
+            stoped: AtomicBool::new(false),
         });
 
         let rocksdb = RocksDB::new(base.clone())?;
@@ -69,7 +69,6 @@ impl Simba {
         let simba = Arc::new(Simba {
             base: base,
             readonly: readonly,
-            stoped: AtomicBool::new(false),
             latch: Latch::new(50000),
             max_sn: RwLock::new(sn),
             rocksdb: Arc::new(rocksdb),
@@ -287,11 +286,11 @@ impl Simba {
                         if let Some(v) = map.remove(field_name) {
                             let index = self.faiss.get_field(field_name)?;
                             let vector: Vec<f32> = serde_json::from_value(v)?;
-                            if index.validate(&vector)? {
+                            if index.befor_add(&vector)? {
                                 //start train job.....
                             }
                             batch
-                                .put(field_coding(general_id, field_name), slice_slice(&vector))?;
+                                .put(field_coding(field_name, general_id), slice_slice(&vector))?;
                         };
                     }
                     _ => {}
@@ -323,7 +322,7 @@ impl Simba {
 
         let mut pre_sn = self.get_sn();
 
-        while !self.stoped.load(SeqCst) {
+        while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
 
             let sn = self.get_sn();
@@ -352,15 +351,25 @@ impl Simba {
     }
 
     pub fn stop(&self) {
-        self.stoped.store(true, SeqCst);
+        self.base.stoped.store(true, SeqCst);
     }
 
     pub fn release(&self) {
-        if !self.stoped.load(SeqCst) {
+        if !self.base.stoped.load(SeqCst) {
             panic!("call release mut take stop function before");
         }
         self.rocksdb.release();
         self.tantivy.release();
+
+        while Arc::strong_count(&self.rocksdb) > 1 {
+            info!(
+                "wait release collection:{} partition:{} now is :{}",
+                self.base.collection.id.unwrap(),
+                self.base.partition.id,
+                Arc::strong_count(&self.rocksdb)
+            );
+            crate::sleep!(300);
+        }
     }
 
     pub fn get_sn(&self) -> u64 {

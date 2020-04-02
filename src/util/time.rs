@@ -21,6 +21,29 @@ pub fn timestamp() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+pub struct Now(DateTime<Local>);
+
+impl Now {
+    pub fn new() -> Self {
+        Now(Local::now())
+    }
+    pub fn use_time(&self) -> i64 {
+        Local::now().timestamp_millis() - self.0.timestamp_millis()
+    }
+
+    pub fn use_time_str(&self) -> String {
+        format!("{} ms", self.use_time())
+    }
+}
+
+#[test]
+pub fn test_since() {
+    let now = Now::new();
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    println!("use time : {:?}", now.use_time());
+    println!("use time : {:?}", now.use_time_str());
+}
+
 #[test]
 pub fn test_timestamp() {
     assert_ne!(timestamp(), "2014-11-28 12:00:09");

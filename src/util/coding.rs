@@ -104,7 +104,7 @@ pub fn iid_coding(iid: i64) -> [u8; 8] {
 	i64_slice(iid)
 }
 
-pub fn field_coding(iid: i64, field_name: &str) -> Vec<u8> {
+pub fn field_coding(field_name: &str, iid: i64) -> Vec<u8> {
 	let mut arr = Vec::with_capacity(9 + field_name.len());
 	arr.push(4);
 	arr.extend_from_slice(field_name.as_bytes());
@@ -142,6 +142,12 @@ pub fn slice_slice<'a, T, V>(s: &'a [T]) -> &'a [V] {
 			s.len() / size_of::<V>() * size_of::<T>(),
 		)
 	}
+}
+
+#[test]
+pub fn test_i64_to_slice() {
+	let a = 123;
+	println!("{:?}", i64_slice(a));
 }
 
 #[test]
