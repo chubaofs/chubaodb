@@ -33,13 +33,14 @@ use rocksdb::WriteBatch;
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering::SeqCst},
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
 };
 
 pub struct Simba {
     pub base: Arc<BaseEngine>,
     readonly: bool,
     latch: Latch,
+    id_locker: Mutex<i64>,
     max_sn: RwLock<u64>,
     //engins
     rocksdb: Arc<RocksDB>,
@@ -70,6 +71,7 @@ impl Simba {
             base: base,
             readonly: readonly,
             latch: Latch::new(50000),
+            id_locker: Mutex::new(0),
             max_sn: RwLock::new(sn),
             rocksdb: Arc::new(rocksdb),
             tantivy: tantivy,
@@ -261,40 +263,32 @@ impl Simba {
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        //general iid .......
         let general_id = 123;
-
         let iid = iid_coding(general_id);
-
         let mut batch = WriteBatch::default();
         batch.put(key, &iid)?;
-
+        batch.put(iid, value)?;
         if self.base.collection.fields.len() == 0 {
-            batch.put(iid, value)?;
             return self.rocksdb.write_batch(batch);
         }
+        self.rocksdb.write_batch(batch)?;
 
         let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
         let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
 
-        if self.base.collection.vector {
+        if self.base.collection.vector_field_index.len() > 0 {
             let map = source.as_object_mut().unwrap();
-            for f in self.base.collection.fields.iter() {
-                match f.internal_type {
-                    FieldType::VECTOR => {
-                        let field_name: &str = f.name.as_ref().unwrap();
-                        if let Some(v) = map.remove(field_name) {
-                            let index = self.faiss.get_field(field_name)?;
-                            let vector: Vec<f32> = serde_json::from_value(v)?;
-                            if index.befor_add(&vector)? {
-                                //start train job.....
-                            }
-                            batch
-                                .put(field_coding(field_name, general_id), slice_slice(&vector))?;
-                        };
+
+            for i in self.base.collection.vector_field_index.iter() {
+                let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
+                if let Some(v) = map.remove(field_name) {
+                    let index = self.faiss.get_field(field_name)?;
+                    let vector: Vec<f32> = serde_json::from_value(v)?;
+                    if index.befor_add(&vector)? {
+                        Faiss::start_job(self.rocksdb.clone(), index.clone());
                     }
-                    _ => {}
-                }
+                    batch.put(field_coding(field_name, general_id), slice_slice(&vector))?;
+                };
             }
             pbdoc.source = serde_json::to_vec(&source)?;
         }

@@ -104,12 +104,12 @@ impl MasterService {
         let seq = self.meta_service.increase_id(entity_key::SEQ_COLLECTION)?;
 
         info!("no coresponding collection found, begin to create connection ");
-        let mut vector = false;
+        let mut vector_index = Vec::new();
         if collection.fields.len() > 0 {
-            for f in collection.get_mut_fields().iter_mut() {
+            for (i, f) in collection.get_mut_fields().iter_mut().enumerate() {
                 validate_and_set_field(f)?;
                 if f.internal_type == FieldType::VECTOR {
-                    vector = true;
+                    vector_index.push(i);
                 }
             }
         }
@@ -117,7 +117,7 @@ impl MasterService {
         collection.id = Some(seq);
         collection.status = Some(CollectionStatus::CREATING);
         collection.modify_time = Some(current_millis());
-        collection.vector = vector;
+        collection.vector_field_index = vector_index;
 
         //let zones = &collection.zones;
         let need_num = collection.partition_num.unwrap();

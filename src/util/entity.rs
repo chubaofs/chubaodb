@@ -91,7 +91,7 @@ pub struct Collection {
     pub status: Option<CollectionStatus>,
     pub modify_time: Option<u64>,
     #[serde(default)] //target has vector field
-    pub vector: bool,
+    pub vector_field_index: Vec<usize>,
 }
 
 impl Collection {
