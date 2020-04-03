@@ -263,15 +263,16 @@ impl Simba {
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        let general_id = 123;
+        let mut lock_id = self.id_locker.lock().unwrap();
+        *lock_id += 1;
+        let general_id = *lock_id;
         let iid = iid_coding(general_id);
         let mut batch = WriteBatch::default();
         batch.put(key, &iid)?;
-        batch.put(iid, value)?;
         if self.base.collection.fields.len() == 0 {
+            batch.put(iid, value)?;
             return self.rocksdb.write_batch(batch);
         }
-        self.rocksdb.write_batch(batch)?;
 
         let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
         let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
@@ -291,9 +292,15 @@ impl Simba {
                 };
             }
             pbdoc.source = serde_json::to_vec(&source)?;
+            let mut buf1 = Vec::new();
+            if let Err(error) = pbdoc.encode(&mut buf1) {
+                return Err(error.into());
+            }
+            batch.put(iid, &buf1)?;
+        } else {
+            batch.put(iid, value)?;
         }
 
-        batch.put(iid, value)?;
         self.rocksdb.write_batch(batch)?;
 
         Ok(())
@@ -314,7 +321,9 @@ impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.base.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
 
-        let mut pre_sn = self.get_sn();
+        let (rocksdb_flush_ratio, faiss_flush_ratio, tantivy_flush_ratio) = (10, 100, 1);
+
+        let mut num = 0;
 
         while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
@@ -330,6 +339,10 @@ impl Simba {
             }
 
             if let Err(e) = self.tantivy.flush() {
+                error!("rocksdb flush has err:{:?}", e);
+            }
+
+            if let Err(e) = self.faiss.flush() {
                 error!("rocksdb flush has err:{:?}", e);
             }
 
