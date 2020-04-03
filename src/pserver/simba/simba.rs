@@ -328,8 +328,6 @@ impl Simba {
         while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
 
-            let sn = self.get_sn();
-
             //TODO: check pre_sn < current sn , and set
 
             let begin = current_millis();
@@ -346,9 +344,7 @@ impl Simba {
                 error!("rocksdb flush has err:{:?}", e);
             }
 
-            pre_sn = sn;
-
-            if let Err(e) = self.rocksdb.write_sn(pre_sn) {
+            if let Err(e) = self.rocksdb.write_sn(0) {
                 error!("write has err :{:?}", e);
             };
 

@@ -75,10 +75,21 @@ impl IndexField {
         self.index.read().unwrap().train(data).unwrap();
     }
 
+    fn add_with_ids(&self, ids: &Vec<i64>, data: &Vec<f32>) -> ASResult<()> {
+        self.index.read().unwrap().add_with_ids(ids, data)
+    }
+
+    fn search(&self, queries: &Vec<f32>, size: i32) -> ASResult<(Vec<i64>, Vec<f32>)> {
+        let num_query = queries.len() as i32 / self.dimension;
+        Ok(self.index.read().unwrap().search(size, num_query, queries))
+    }
+
     fn stop(&self, sync: bool) {
         {
             let mut stop = self.status.write().unwrap();
-            *stop = IndexStatus::Stoping;
+            if stop.deref() != &IndexStatus::Stoped {
+                *stop = IndexStatus::Stoping;
+            }
         }
 
         if sync {
@@ -217,7 +228,6 @@ impl Faiss {
             let ids = &mut ids;
             let prefix = field_coding(field_name, index.max_id.load(SeqCst) + 1);
 
-            let need_sleep = &mut true;
             let result = db.prefix_range(prefix, |k, v| -> ASResult<bool> {
                 if k >= suffix.as_slice() {
                     return Ok(false);
@@ -237,24 +247,32 @@ impl Faiss {
                 temp.extend_from_slice(slice_slice(v));
 
                 if temp.len() >= max_len {
-                    *need_sleep = false;
                     return Ok(false);
                 }
 
                 return Ok(true);
             });
 
-            if *need_sleep {
+            if let Err(e) = result {
+                error!("create index has err:{:?}", e);
+                crate::sleep!(3000);
+                continue;
+            }
+
+            if let Err(e) = index.add_with_ids(ids, temp) {
+                error!("index with ids has err:{:?}", e);
+                crate::sleep!(3000);
+                continue;
+            };
+
+            index.max_id.store(ids[ids.len() - 1], SeqCst);
+
+            if ids.len() < index.train_size {
                 crate::sleep!(3000);
             }
 
-            if let Err(e) = result {
-                error!("create index has err:{:?}", e);
-            }
-
-            index.train(temp);
-
             unsafe {
+                ids.set_len(0);
                 temp.set_len(0);
             }
         }
@@ -270,7 +288,20 @@ impl Engine for Faiss {
         Ok(())
     }
 
-    fn release(&self) {}
+    fn release(&self) {
+        for (f, i) in self.fields.iter() {
+            i.stop(false);
+        }
+
+        //take twoice
+        for (f, i) in self.fields.iter() {
+            i.stop(true);
+        }
+
+        if let Err(e) = self.flush() {
+            error!("flush faiss engine has err:{:?}", e);
+        };
+    }
 }
 
 fn make_index_id(index: u8, id: i64) -> i64 {
