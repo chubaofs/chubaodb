@@ -19,10 +19,13 @@ use fp_rust::sync::CountDownLatch;
 use log::{error, info};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering::SeqCst},
+    mpsc, Arc, Mutex, RwLock,
+};
 use std::thread;
 pub struct PartitionService {
-    pub server_id: u32,
+    pub server_id: AtomicI32,
     pub simba_map: RwLock<HashMap<(u32, u32), Arc<RwLock<Simba>>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
@@ -32,7 +35,7 @@ pub struct PartitionService {
 impl PartitionService {
     pub fn new(conf: Arc<config::Config>) -> Self {
         PartitionService {
-            server_id: 0,
+            server_id: AtomicI32::new(0),
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
@@ -40,7 +43,7 @@ impl PartitionService {
         }
     }
 
-    pub async fn init(&mut self) -> ASResult<()> {
+    pub async fn init(&self) -> ASResult<()> {
         let ps = match self
             .meta_client
             .heartbeat(
@@ -54,9 +57,6 @@ impl PartitionService {
             Ok(p) => p,
             Err(e) => {
                 let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
-                    return Err(e);
-                }
                 PServer::new(
                     self.conf.ps.zone_id,
                     None,
@@ -64,9 +64,12 @@ impl PartitionService {
                 )
             }
         };
-        if ps.id.is_some() {
-            self.server_id = ps.id.unwrap();
+
+        if ps.ps_id.is_none() || ps.ps_id.unwrap() <= 0 {
+            return Err("got id for master has err got:{:?} ", ps.ps_id);
         }
+
+        self.server_id.store(ps.ps_id.unwrap(), SeqCst);
 
         info!("get_server line:{:?}", ps);
 
@@ -146,7 +149,7 @@ impl PartitionService {
             readonly,
             collection.clone(),
             partition.clone(),
-            self.server_id,
+            self.server_id.load(SeqCst),
             latch.clone(),
         ) {
             Ok(simba) => {
@@ -240,23 +243,15 @@ impl PartitionService {
             .map(|s| (*s.read().unwrap().partition).clone())
             .collect::<Vec<Partition>>();
 
-        match self
-            .meta_client
+        self.meta_client
             .put_pserver(&PServer {
-                id: Some(self.server_id),
+                id: Some(self.load(SeqCst)),
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
                 modify_time: 0,
             })
-            .await
-        {
-            Ok(server) => {
-                self.server_id = server.id.unwrap();
-                return Ok(());
-            }
-            Err(e) => Err(e),
-        }
+            .await?
     }
 
     pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<GeneralResponse> {
