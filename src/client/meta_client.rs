@@ -36,10 +36,10 @@ impl MetaClient {
         }
     }
 
-    pub async fn put_pserver(&self, pserver: &PServer) -> ASResult<()> {
+    pub async fn put_pserver(&self, pserver: &PServer) -> ASResult<PServer> {
         let url = format!("http://{}/pserver/put", self.conf.master_addr());
-        let _: PServer = http_client::post_json(&url, DEF_TIME_OUT, pserver).await?;
-        Ok(())
+        let server: PServer = http_client::post_json(&url, DEF_TIME_OUT, pserver).await?;
+        Ok(server)
     }
 
     pub async fn heartbeat(
@@ -96,11 +96,15 @@ impl MetaClient {
 
     pub async fn get_server_addr_by_id(&self, server_id: u64) -> ASResult<String> {
         let url = format!(
-            "http://{}/pserver/get_by_id/{}",
+            "http://{}/pserver/get_addr_by_id/{}",
             self.conf.master_addr(),
             server_id,
         );
-        //TODO
-        http_client::get_json(&url, DEF_TIME_OUT).await
+        let value: serde_json::Value = http_client::get_json(&url, DEF_TIME_OUT).await?;
+
+        match value.get("addr") {
+            Some(addr) => Ok(addr.as_str().unwrap().to_string()),
+            None => Err(err_box(format!("got addr from master:{} is no addr", url))),
+        }
     }
 }

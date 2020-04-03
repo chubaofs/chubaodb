@@ -45,7 +45,7 @@ pub struct Simba {
     _collection: Arc<Collection>,
     pub partition: Arc<Partition>,
     readonly: bool,
-    pub started: AtomicBool,
+    pub stoped: AtomicBool,
     writable: AtomicBool,
     latch: Latch,
     max_sn: RwLock<u64>,
@@ -54,7 +54,7 @@ pub struct Simba {
     pub tantivy: Option<Tantivy>,
     pub raft: Option<RaftEngine>,
     pub base_engine: Arc<BaseEngine>,
-    pub server_id: u64,
+    pub server_id: u32,
     pub start_latch: Arc<Option<CountDownLatch>>,
 }
 
@@ -64,7 +64,7 @@ impl Simba {
         readonly: bool,
         collection: Arc<Collection>,
         partition: Arc<Partition>,
-        server_id: u64,
+        server_id: u32,
         latch: Arc<Option<CountDownLatch>>,
     ) -> ASResult<Arc<RwLock<Simba>>> {
         let base: Arc<BaseEngine> = Arc::new(BaseEngine {
@@ -80,9 +80,10 @@ impl Simba {
             _collection: collection.clone(),
             partition: partition.clone(),
             readonly: readonly,
-            started: AtomicBool::new(true),
+            stoped: AtomicBool::new(false),
             writable: AtomicBool::new(false),
             latch: Latch::new(50000),
+            max_sn: RwLock::new(0),
             base_engine: base.clone(),
             server_id: server_id,
             start_latch: latch.clone(),
@@ -132,9 +133,9 @@ impl Simba {
 
     //it use 1.estimate of rocksdb  2.index of u64
     pub fn count(&self) -> ASResult<(u64, u64)> {
-        let estimate_rocksdb = self.rocksdb.count()?;
+        let estimate_rocksdb = self.rocksdb.as_ref().unwrap().count()?;
 
-        let tantivy_count = self.tantivy.count()?;
+        let tantivy_count = self.tantivy.as_ref().unwrap().count()?;
 
         Ok((estimate_rocksdb, tantivy_count))
     }
@@ -267,10 +268,10 @@ impl Simba {
         self.do_write(&iid, &buf1)
     }
 
-     fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
+    fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         if self.check_writable() {
-        self.rocksdb.write(key, value)?;
-        self.tantivy.write(key, value)?;
+            self.rocksdb.as_ref().unwrap().write(key, value)?;
+            self.tantivy.as_ref().unwrap().write(key, value)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
                 PutEvent {
@@ -288,10 +289,10 @@ impl Simba {
         }
     }
 
-    async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
+    fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
         if self.check_writable() {
-        self.rocksdb.delete(key)?;
-        self.tantivy.delete(key)?;
+            self.rocksdb.as_ref().unwrap().delete(key)?;
+            self.tantivy.as_ref().unwrap().delete(key)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
                 DelEvent { k: key.to_vec() },
@@ -305,7 +306,6 @@ impl Simba {
         } else {
             Err(err_code_str_box(ENGINE_NOT_WRITABLE, "engin not writable!"))
         }
-
     }
 
     pub fn readonly(&self) -> bool {
@@ -313,7 +313,7 @@ impl Simba {
     }
 
     fn check_writable(&self) -> bool {
-        self.started.load(SeqCst) && self.writable.load(SeqCst)
+        !self.stoped.load(SeqCst) && self.writable.load(SeqCst)
     }
 }
 
@@ -341,17 +341,17 @@ impl Simba {
 
             let begin = current_millis();
 
-            if let Err(e) = self.rocksdb.flush() {
+            if let Err(e) = self.rocksdb.as_ref().unwrap().flush() {
                 error!("rocksdb flush has err:{:?}", e);
             }
 
-            if let Err(e) = self.tantivy.flush() {
+            if let Err(e) = self.tantivy.as_ref().unwrap().flush() {
                 error!("rocksdb flush has err:{:?}", e);
             }
 
             pre_sn = sn;
 
-            if let Err(e) = self.rocksdb.write_sn(pre_sn) {
+            if let Err(e) = self.rocksdb.as_ref().unwrap().write_sn(pre_sn) {
                 error!("write has err :{:?}", e);
             };
 
@@ -364,15 +364,15 @@ impl Simba {
         self.stoped.store(true, SeqCst);
     }
 
-
     pub fn release(&self) {
-        self.started.store(false, SeqCst);
+        //TODO
+        if !self.stoped.load(SeqCst) {}
         self.raft.as_ref().unwrap().release();
         self.offload_engine();
     }
 
     pub fn role_change(mut self, is_leader: bool) {
-        if self.started.load(SeqCst) {
+        if !self.stoped.load(SeqCst) {
             let _lock = self.latch.latch_lock(u32::max_value());
 
             if is_leader {
@@ -394,7 +394,7 @@ impl Simba {
     fn load_engine(&mut self) {
         let rocksdb = RocksDB::new(BaseEngine::new(&self.base_engine)).unwrap();
         let tantivy = Tantivy::new(BaseEngine::new(&self.base_engine)).unwrap();
-        let log_start_index = cmp::min(rocksdb.get_sn(), tantivy.get_sn());
+        let log_start_index = rocksdb.read_sn().unwrap();
         self.rocksdb = Some(rocksdb);
         self.tantivy = Some(tantivy);
         match self.raft.as_ref().unwrap().begin_read_log(log_start_index) {
@@ -411,14 +411,8 @@ impl Simba {
                                             let del = DelEvent {
                                                 k: vec![0, 0, 0, 0],
                                             }; //event as Box<DelEvent>;
-                                            self.rocksdb
-                                                .as_ref()
-                                                .unwrap()
-                                                .delete(log_index, &del.k.clone());
-                                            self.tantivy
-                                                .as_ref()
-                                                .unwrap()
-                                                .delete(log_index, &del.k.clone());
+                                            self.rocksdb.as_ref().unwrap().delete(&del.k.clone());
+                                            self.tantivy.as_ref().unwrap().delete(&del.k.clone());
                                         }
                                         EventType::Put => {
                                             // let put = event as Box<PutEvent>;

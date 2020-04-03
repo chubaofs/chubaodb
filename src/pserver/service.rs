@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 pub struct PartitionService {
-    pub server_id: u64,
+    pub server_id: u32,
     pub simba_map: RwLock<HashMap<(u32, u32), Arc<RwLock<Simba>>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
@@ -64,8 +64,9 @@ impl PartitionService {
                 )
             }
         };
-
-        self.server_id = ps.id.unwrap();
+        if ps.id.is_some() {
+            self.server_id = ps.id.unwrap();
+        }
 
         info!("get_server line:{:?}", ps);
 
@@ -239,15 +240,23 @@ impl PartitionService {
             .map(|s| (*s.read().unwrap().partition).clone())
             .collect::<Vec<Partition>>();
 
-        self.meta_client
+        match self
+            .meta_client
             .put_pserver(&PServer {
-                id: None,
+                id: Some(self.server_id),
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
                 modify_time: 0,
             })
             .await
+        {
+            Ok(server) => {
+                self.server_id = server.id.unwrap();
+                return Ok(());
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<GeneralResponse> {
@@ -278,12 +287,15 @@ impl PartitionService {
             make_not_found_err(req.collection_id, req.partition_id)?
         };
 
+        let doc = store
+            .read()
+            .unwrap()
+            .get(req.id.as_str(), req.sort_key.as_str())?;
+
         Ok(DocumentResponse {
             code: SUCCESS as i32,
             message: String::from("success"),
-            doc: store
-                .read()
-                .unwrap().get(req.id.as_str(), req.sort_key.as_str())?,
+            doc: doc,
         })
     }
 
@@ -303,7 +315,7 @@ impl PartitionService {
                 return make_not_found_err(cpid.0, cpid.1);
             };
 
-            match simba.read().unwrap().count() {
+            match simba.clone().read().unwrap().count() {
                 Ok(v) => {
                     cdr.estimate_count += v.0;
                     cdr.index_count += v.1;
@@ -335,7 +347,7 @@ impl PartitionService {
                 let tx = tx.clone();
                 let sdreq = sdreq.clone();
                 thread::spawn(move || {
-                    tx.send(simba.search(sdreq)).unwrap();
+                    tx.send(simba.read().unwrap().search(sdreq)).unwrap();
                 });
             } else {
                 return make_not_found_err(cpid.0, cpid.1);

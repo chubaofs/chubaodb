@@ -202,7 +202,7 @@ impl Rpc for RPCService {
                 replica_type: replica_type,
             });
         }
-        let mut result = match self
+        let result = match self
             .service
             .init_partition(
                 req.collection_id,
@@ -232,13 +232,14 @@ impl Rpc for RPCService {
 
         if let Err(e) = self.service.take_heartbeat().await {
             let e = cast_to_err(e);
-            result = GeneralResponse {
+
+            return Ok(Response::new(GeneralResponse {
                 code: e.0 as i32,
                 message: format!(
                     "load_or_create partiiton in:{} has err:{}",
                     self.service.conf.global.ip, e.1
                 ),
-            };
+            }));
         }
 
         Ok(Response::new(result))

@@ -1,4 +1,16 @@
-// Copyright 2020 The Chubao Authors. Licensed under Apache-2.0.
+// Copyright 2020 The Chubao Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
 use crate::pserver::simba::simba::Simba;
 use crate::util::{coding::*, config, entity::*, error::*};
 
@@ -33,8 +45,11 @@ impl Deref for RaftEngine {
 
 impl RaftEngine {
     pub fn new(base: Arc<BaseEngine>, simba: Arc<RwLock<Simba>>) -> Self {
-        let raft: Arc<Raft> =
-            create_raft(simba.clone(), base.clone(), simba.read().unwrap().server_id);
+        let raft: Arc<Raft> = create_raft(
+            simba.clone(),
+            base.clone(),
+            simba.read().unwrap().server_id as u64,
+        );
         Self {
             base: base.clone(),
             simba: simba.clone(),
@@ -200,7 +215,6 @@ struct SimpleStateMachine {
 impl StateMachine for SimpleStateMachine {
     fn apply(&mut self, result: &CmdResult) -> RResult<()> {
         self.persisted = result.index;
-        self.engine.set_sn_if_max(result.index);
         unsafe {
             let cb = &mut *(result.tag as *mut AppendCallbackFaced);
             cb.call();
@@ -257,7 +271,10 @@ use futures::executor::block_on;
 impl NodeResolver for SimpleNodeResolver {
     fn get_node_address(&self, node_id: u64) -> RResult<String> {
         match block_on(self.meta_client.get_server_addr_by_id(node_id)) {
-            Ok(addr) => Ok(addr),
+            Ok(addr) => {
+                let parts: Vec<&str> = addr.split("_").collect();
+                Ok(parts[0].to_string())
+            }
             Err(_) => Err(jimraft::error::err_str(
                 &format!("get node address error,node id[{}] ", node_id).as_str(),
             )),
@@ -311,7 +328,7 @@ fn create_peers(partition: &Partition, node_id: u64) -> (u64, Vec<Peer>) {
     let mut current_peer_id = 0;
     let mut peers: Vec<Peer> = vec![];
     for replica in &partition.replicas {
-        if replica.node == node_id {
+        if replica.node == node_id as u32 {
             current_peer_id = replica.peer;
         }
         let mut peer_type = PeerType::NORMAL;
@@ -322,7 +339,7 @@ fn create_peers(partition: &Partition, node_id: u64) -> (u64, Vec<Peer>) {
 
         let peer: Peer = Peer {
             type_: peer_type,
-            node_id: replica.node,
+            node_id: replica.node as u64,
             id: replica.peer,
         };
 
@@ -333,8 +350,8 @@ fn create_peers(partition: &Partition, node_id: u64) -> (u64, Vec<Peer>) {
 }
 
 impl Engine for RaftEngine {
-    fn flush(&self, pre_sn: u64) -> Option<u64> {
-        None
+    fn flush(&self) -> ASResult<()> {
+        Ok(())
     }
 
     fn release(&self) {

@@ -108,7 +108,7 @@ message WriteDocumentRequest {
 }
 
 message ReplicaInfo{
-  uint64 node =1;
+  uint32 node =1;
   uint64 peer =2;
   uint32 replica_type =3;
 }

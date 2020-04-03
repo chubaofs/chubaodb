@@ -52,6 +52,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
             .route("/pserver/put", web::post().to(update_pserver))
             .route("/pserver/list", web::get().to(list_pservers))
             .route("/pserver/heartbeat", web::post().to(heartbeat))
+            .route("/pserver/get_addr_by_id", web::get().to(get_addr))
             //collection handler
             .route("/collection/create", web::post().to(create_collection))
             .route(
@@ -242,6 +243,19 @@ async fn list_pservers(rs: web::Data<Arc<MasterService>>) -> HttpResponse {
     info!("prepare to list pservers");
     match rs.list_servers() {
         Ok(s) => success_response(s),
+        Err(e) => {
+            error!("list pserver failed, err: {}", e.to_string());
+            err_response(e)
+        }
+    }
+}
+
+async fn get_addr(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> HttpResponse {
+    info!("prepare to get pservers addr by server id");
+
+    let server_id: u32 = req.match_info().get("server_id").unwrap().parse().unwrap();
+    match rs.get_server_addr(server_id) {
+        Ok(s) => success_response(json!({ "addr": s })),
         Err(e) => {
             error!("list pserver failed, err: {}", e.to_string());
             err_response(e)

@@ -257,9 +257,55 @@ impl MasterService {
     }
 
     pub fn update_server(&self, mut server: PServer) -> ASResult<PServer> {
-        server.modify_time = current_millis();
-        self.meta_service.put(&server)?;
-        Ok(server)
+        if server.id.is_none() || server.id.unwrap() == 0 {
+            match self.get_server(&server.addr.as_str()) {
+                Ok(pserver) => {
+                    server.modify_time = current_millis();
+                    server.id = pserver.id;
+                    self.meta_service.put(&server)?;
+                    return Ok(server);
+                }
+                Err(e) => {
+                    let e = cast_to_err(e);
+                    if e.0 != NOT_FOUND {
+                        return Err(e);
+                    }
+                    let seq = self.meta_service.increase_id(entity_key::SEQ_PSERVER)?;
+                    server.id = Some(seq);
+                    match self.meta_service.put_kv(
+                        &entity_key::pserver_id(seq).as_str(),
+                        &server.addr.as_bytes(),
+                    ) {
+                        Ok(_) => {}
+                        Err(e) => return Err(e),
+                    }
+                    match self.meta_service.create(&server) {
+                        Ok(_) => {
+                            return Ok(server);
+                        }
+                        Err(e) => {
+                            let e = cast_to_err(e);
+                            if e.0 != ALREADY_EXISTS {
+                                return Err(e);
+                            }
+                            match self.get_server(&server.addr.as_str()) {
+                                Ok(pserver) => {
+                                    server.modify_time = current_millis();
+                                    server.id = pserver.id;
+                                    self.meta_service.put(&server)?;
+                                    return Ok(server);
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            server.modify_time = current_millis();
+            self.meta_service.put(&server)?;
+            return Ok(server);
+        }
     }
 
     pub fn list_servers(&self) -> ASResult<Vec<PServer>> {
@@ -270,6 +316,19 @@ impl MasterService {
     pub fn get_server(&self, server_addr: &str) -> ASResult<PServer> {
         self.meta_service
             .get(entity_key::pserver(server_addr).as_str())
+    }
+
+    pub fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
+        match self
+            .meta_service
+            .get_kv(entity_key::pserver_id(server_id).as_str())
+        {
+            Ok(v) => match String::from_utf8(v) {
+                Ok(v) => Ok(v),
+                Err(e) => Err(err_box(String::from("Invalid server addr UTF-8 sequence "))),
+            },
+            Err(e) => Err(e),
+        }
     }
 
     pub fn list_zones(&self) -> ASResult<Vec<Zone>> {
