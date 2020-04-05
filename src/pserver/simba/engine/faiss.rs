@@ -183,7 +183,7 @@ impl Faiss {
         let field_name = index.field.name.as_ref().unwrap();
 
         let prefix = field_coding(field_name, index.max_id.load(SeqCst) + 1);
-        let suffix = field_coding(field_name, i64::MAX);
+        let suffix = field_coding(field_name, i64::max_value());
 
         let now = Now::new();
 

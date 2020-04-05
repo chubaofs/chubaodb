@@ -86,6 +86,7 @@ pub struct Collection {
     #[serde(default)]
     pub fields: Vec<Field>,
     pub partition_num: Option<u32>,
+    pub partition_replica_num: Option<u32>,
     pub partitions: Option<Vec<u32>>,
     pub slots: Option<Vec<u32>>,
     pub status: Option<CollectionStatus>,
@@ -110,6 +111,19 @@ pub struct Partition {
     pub collection_id: u32,
     pub leader: String,
     pub version: u64,
+    pub replicas: Vec<Replica>,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Replica {
+    pub node: u32,
+    pub peer: u64,
+    pub replica_type: ReplicaType,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ReplicaType {
+    NORMAL = 0,  //normal type
+    LEARNER = 1, //learner type
 }
 
 impl Partition {
@@ -124,6 +138,7 @@ impl Partition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PServer {
+    pub id: Option<u32>,
     pub addr: String,
     #[serde(default)]
     pub write_partitions: Vec<Partition>,
@@ -133,8 +148,9 @@ pub struct PServer {
 }
 
 impl PServer {
-    pub fn new(zone_id: u32, addr: String) -> Self {
+    pub fn new(zone_id: u32, id: Option<u32>, addr: String) -> Self {
         PServer {
+            id: id,
             zone_id: zone_id,
             write_partitions: Vec::default(),
             addr: addr,
@@ -258,9 +274,11 @@ pub mod entity_key {
     const PREFIX_PSERVER: &str = "/META/SERVER";
     const PREFIX_COLLECTION: &str = "/META/COLLECTION";
     const PREFIX_PARTITION: &str = "/META/PARTITION";
+    const PREFIX_PSERVER_ID: &str = "/META/SERVER_ID";
 
     pub const SEQ_COLLECTION: &str = "/META/SEQUENCE/COLLECTION";
     pub const SEQ_PARTITION: &str = "/META/SEQUENCE/PARTITION";
+    pub const SEQ_PSERVER: &str = "/META/SEQUENCE/PSERVER";
 
     pub fn zone(id: u32) -> String {
         format!("{}/{}", PREFIX_ZONE, id)
@@ -275,6 +293,10 @@ pub mod entity_key {
     }
     pub fn pserver_prefix() -> String {
         format!("{}/", PREFIX_PSERVER)
+    }
+
+    pub fn pserver_id(server_id: u32) -> String {
+        format!("{}/{}", PREFIX_PSERVER_ID, server_id)
     }
 
     pub fn collection(id: u32) -> String {

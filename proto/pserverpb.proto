@@ -11,130 +11,137 @@
  // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or 
  // implied. See the License for the specific language governing 
  // permissions and limitations under the License.
-syntax = "proto3";
+ syntax = "proto3";
 
-option java_multiple_files = true;
-option java_package = "chubaodb.pserverpb.proto";
-option java_outer_classname = "PserverpbProto";
-
-package pserverpb;
-
-service Rpc {
-  // document handler
-  rpc Write(WriteDocumentRequest) returns (GeneralResponse) {}
-  rpc Get(GetDocumentRequest) returns (DocumentResponse) {}
-  rpc Search(SearchDocumentRequest) returns (SearchDocumentResponse) {}
-  rpc Count(CountDocumentRequest) returns (CountDocumentResponse) {}
-  // ps handler
-  rpc Status(GeneralRequest) returns (GeneralResponse) {}
-  rpc LoadPartition(PartitionRequest) returns (GeneralResponse) {}
-  rpc OffloadPartition(PartitionRequest) returns (GeneralResponse) {}
-
-  // system handler
-  rpc Command(CommandRequest) returns (CommandResponse);
-}
-
-message CountDocumentRequest { repeated uint64 cpids = 1; }
-
-message CountDocumentResponse {
-  int32 code = 1;
-  uint64 estimate_count = 3;
-  uint64 index_count = 4;
-  string message = 5;
-}
-
-message SearchDocumentRequest {
-  repeated uint64 cpids = 1;
-  string query = 2;
-  repeated string def_fields = 3;
-  uint32 size = 4;
-}
-
-message SearchDocumentResponse {
-  int32 code = 1;
-  uint64 total = 2;
-  repeated Hit hits = 3;
-  SearchInfo info = 4;
-}
-
-message SearchInfo {
-  int32 success = 1;
-  int32 error = 2;
-  string message = 3;
-}
-
-message GetDocumentRequest {
-  uint32 collection_id = 1;
-  uint32 partition_id = 2;
-  string id = 3;
-  string sort_key = 4;
-}
-
-message DocumentResponse {
-  int32 code = 1;
-  string message = 2;
-  bytes doc = 3;
-}
-
-message Hit {
-  string collection_name = 1;
-  float score = 2;
-  bytes doc = 3;
-}
-
-message Document {
-  string id = 1;
-  string sort_key = 2;
-  int64 version = 3;
-  uint32 slot = 4;
-  uint32 partition_id = 5;
-  bytes source = 6;
-}
-
-enum WriteType {
-  unknow = 0;
-  overwrite = 1;
-  create = 2;
-  update = 3;
-  upsert = 4;
-  delete = 5;
-}
-
-message WriteDocumentRequest {
-  uint32 collection_id = 1;
-  uint32 partition_id = 2;
-  Document doc = 3;
-  WriteType write_type = 4;
-}
-
-message PartitionRequest {
-  uint32 partition_id = 1;
-  uint32 collection_id = 2;
-  bool readonly = 3;
-  // if version ==0 not check version .
-  uint64 version = 4;
-}
-
-message StatsResponse {
-  int32 code = 1;
-  uint32 collection_id = 2;
-  uint32 partition_id = 3;
-}
-
-message GeneralRequest {
-  uint32 collection_id = 2;
-  uint32 partition_id = 1;
-}
-
-message GeneralResponse {
-  int32 code = 1;
-  string message = 2;
-}
-
-message CommandRequest { bytes body = 2; }
-
-message CommandResponse {
-  int32 code = 1;
-  string message = 2;
-  bytes body = 3;
-}
+ option java_multiple_files = true;
+ option java_package = "chubaodb.pserverpb.proto";
+ option java_outer_classname = "PserverpbProto";
+ 
+ package pserverpb;
+ 
+ service Rpc {
+   // document handler
+   rpc Write(WriteDocumentRequest) returns (GeneralResponse) {}
+   rpc Get(GetDocumentRequest) returns (DocumentResponse) {}
+   rpc Search(SearchDocumentRequest) returns (SearchDocumentResponse) {}
+   rpc Count(CountDocumentRequest) returns (CountDocumentResponse) {}
+   // ps handler
+   rpc Status(GeneralRequest) returns (GeneralResponse) {}
+   rpc LoadPartition(PartitionRequest) returns (GeneralResponse) {}
+   rpc OffloadPartition(PartitionRequest) returns (GeneralResponse) {}
+ 
+   // system handler
+   rpc Command(CommandRequest) returns (CommandResponse);
+ }
+ 
+ message CountDocumentRequest { repeated uint64 cpids = 1; }
+ 
+ message CountDocumentResponse {
+   int32 code = 1;
+   uint64 estimate_count = 3;
+   uint64 index_count = 4;
+   string message = 5;
+ }
+ 
+ message SearchDocumentRequest {
+   repeated uint64 cpids = 1;
+   string query = 2;
+   repeated string def_fields = 3;
+   uint32 size = 4;
+ }
+ 
+ message SearchDocumentResponse {
+   int32 code = 1;
+   uint64 total = 2;
+   repeated Hit hits = 3;
+   SearchInfo info = 4;
+ }
+ 
+ message SearchInfo {
+   int32 success = 1;
+   int32 error = 2;
+   string message = 3;
+ }
+ 
+ message GetDocumentRequest {
+   uint32 collection_id = 1;
+   uint32 partition_id = 2;
+   string id = 3;
+   string sort_key = 4;
+ }
+ 
+ message DocumentResponse {
+   int32 code = 1;
+   string message = 2;
+   bytes doc = 3;
+ }
+ 
+ message Hit {
+   string collection_name = 1;
+   float score = 2;
+   bytes doc = 3;
+ }
+ 
+ message Document {
+   string id = 1;
+   string sort_key = 2;
+   int64 version = 3;
+   uint32 slot = 4;
+   uint32 partition_id = 5;
+   bytes source = 6;
+ }
+ 
+ enum WriteType {
+   unknow = 0;
+   overwrite = 1;
+   create = 2;
+   update = 3;
+   upsert = 4;
+   delete = 5;
+ }
+ 
+ message WriteDocumentRequest {
+   uint32 collection_id = 1;
+   uint32 partition_id = 2;
+   Document doc = 3;
+   WriteType write_type = 4;
+ }
+ 
+ message ReplicaInfo{
+   uint32 node =1;
+   uint64 peer =2;
+   uint32 replica_type =3;
+ }
+ 
+ message PartitionRequest {
+   uint32 partition_id = 1;
+   uint32 collection_id = 2;
+   bool readonly = 3;
+   // if version ==0 not check version .
+   uint64 version = 4;
+   repeated ReplicaInfo replicas = 5;
+ }
+ 
+ message StatsResponse {
+   int32 code = 1;
+   uint32 collection_id = 2;
+   uint32 partition_id = 3;
+ }
+ 
+ message GeneralRequest {
+   uint32 collection_id = 2;
+   uint32 partition_id = 1;
+ }
+ 
+ message GeneralResponse {
+   int32 code = 1;
+   string message = 2;
+ }
+ 
+ message CommandRequest { bytes body = 2; }
+ 
+ message CommandResponse {
+   int32 code = 1;
+   string message = 2;
+   bytes body = 3;
+ }

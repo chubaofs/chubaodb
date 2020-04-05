@@ -16,6 +16,7 @@ use crate::pserverpb::{
     rpc_server::{Rpc, RpcServer},
     *,
 };
+use crate::util::entity::*;
 use crate::util::{config, error::*};
 use log::{error, info};
 use std::error::Error;
@@ -189,11 +190,24 @@ impl Rpc for RPCService {
         let req = request.into_inner();
         info!("Start server load_or_create_partition");
 
-        let mut result = match self
+        let mut replicas: Vec<Replica> = vec![];
+        for rep in req.replicas {
+            let mut replica_type: ReplicaType = ReplicaType::NORMAL;
+            if rep.replica_type == 1 {
+                replica_type = ReplicaType::LEARNER;
+            }
+            replicas.push(Replica {
+                node: rep.node,
+                peer: rep.peer,
+                replica_type: replica_type,
+            });
+        }
+        let result = match self
             .service
             .init_partition(
                 req.collection_id,
                 req.partition_id,
+                replicas,
                 req.readonly,
                 req.version,
             )
@@ -217,13 +231,14 @@ impl Rpc for RPCService {
 
         if let Err(e) = self.service.take_heartbeat().await {
             let e = cast_to_err(e);
-            result = GeneralResponse {
+
+            return Ok(Response::new(GeneralResponse {
                 code: e.0 as i32,
                 message: format!(
                     "load_or_create partiiton in:{} has err:{}",
                     self.service.conf.global.ip, e.1
                 ),
-            };
+            }));
         }
 
         Ok(Response::new(result))

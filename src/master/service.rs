@@ -20,7 +20,9 @@ use crate::sleep;
 use crate::util::time::*;
 use crate::util::{coding, config::Config, entity::*, error::*};
 use log::{error, info, warn};
+use rand::Rng;
 use serde_json::json;
+use std::cmp;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 
@@ -119,14 +121,14 @@ impl MasterService {
         collection.modify_time = Some(current_millis());
         collection.vector_field_index = vector_index;
 
-        //let zones = &collection.zones;
-        let need_num = collection.partition_num.unwrap();
+        let partition_num = collection.partition_num.unwrap();
+        let partition_replica_num = collection.partition_replica_num.unwrap();
 
-        // TODO default zone ID
         let server_list: Vec<PServer> = self
             .meta_service
             .list(entity_key::pserver_prefix().as_str())?;
 
+        let need_num = cmp::max(partition_num, partition_replica_num);
         if need_num as usize > server_list.len() {
             return Err(Box::from(err(format!(
                 "need pserver size:{} but all server is:{}",
@@ -135,8 +137,12 @@ impl MasterService {
             ))));
         }
         let mut use_list: Vec<PServer> = Vec::new();
+        let random = rand::thread_rng().gen_range(0, server_list.len());
         //from list_server find need_num for use
-        for s in server_list.iter() {
+        let mut index = random % server_list.len();
+        let mut detected_times = 1;
+        loop {
+            let s = server_list.get(index).unwrap();
             let ok = match self.ps_cli.status(s.addr.as_str()).await {
                 Ok(gr) => match gr.code as u16 {
                     ENGINE_WILL_CLOSE => false,
@@ -151,26 +157,50 @@ impl MasterService {
                 continue;
             }
             use_list.push(s.clone());
-            if use_list.len() >= need_num as usize {
+            if use_list.len() >= need_num as usize || detected_times >= server_list.len() {
                 break;
             }
+            index += 1;
+            detected_times += 1;
         }
 
-        let mut partitions = Vec::with_capacity(need_num as usize);
-        let mut pids = Vec::with_capacity(need_num as usize);
-        let mut slots = Vec::with_capacity(need_num as usize);
-        let range = u32::max_value() / need_num;
+        if need_num as usize > use_list.len() {
+            return Err(Box::from(err(format!(
+                "need pserver size:{} but available server is:{}",
+                need_num,
+                use_list.len()
+            ))));
+        }
 
+        let mut partitions = Vec::with_capacity(partition_num as usize);
+        let mut pids = Vec::with_capacity(partition_num as usize);
+        let mut slots = Vec::with_capacity(partition_num as usize);
+        let range = u32::max_value() / partition_num;
         for i in 0..need_num {
             let server = use_list.get(i as usize).unwrap();
             pids.push(i);
             slots.push(i * range);
+            let mut replicas: Vec<Replica> = Vec::new();
+            for j in 0..partition_replica_num {
+                let id = use_list
+                    .get((i + j % need_num) as usize)
+                    .unwrap()
+                    .id
+                    .unwrap();
+                replicas.push(Replica {
+                    node: id,
+                    peer: current_millis(),
+                    replica_type: ReplicaType::NORMAL,
+                });
+            }
             let partition = Partition {
                 id: i,
                 collection_id: seq,
                 leader: server.addr.to_string(),
                 version: 0,
+                replicas: replicas,
             };
+
             partitions.push(partition.clone());
         }
 
@@ -183,12 +213,21 @@ impl MasterService {
         self.meta_service.create(&collection)?;
 
         for c in partitions {
+            let mut replicas: Vec<ReplicaInfo> = vec![];
+            for r in c.replicas {
+                replicas.push(ReplicaInfo {
+                    node: r.node,
+                    peer: r.peer,
+                    replica_type: r.replica_type as u32,
+                });
+            }
             PartitionClient::new(c.leader)
                 .load_or_create_partition(PartitionRequest {
                     partition_id: c.id,
                     collection_id: c.collection_id,
                     readonly: false,
                     version: 0,
+                    replicas: replicas,
                 })
                 .await?;
         }
@@ -223,7 +262,7 @@ impl MasterService {
     pub fn update_server(&self, mut server: PServer) -> ASResult<PServer> {
         server.modify_time = current_millis();
         self.meta_service.put(&server)?;
-        Ok(server)
+        return Ok(server);
     }
 
     pub fn list_servers(&self) -> ASResult<Vec<PServer>> {
@@ -234,6 +273,58 @@ impl MasterService {
     pub fn get_server(&self, server_addr: &str) -> ASResult<PServer> {
         self.meta_service
             .get(entity_key::pserver(server_addr).as_str())
+    }
+
+    pub fn register(&self, mut server: PServer) -> ASResult<PServer> {
+        match self.get_server(server.addr.clone().as_ref()) {
+            Ok(ps) => Ok(ps),
+            Err(e) => {
+                let e = cast_to_err(e);
+                if e.0 != NOT_FOUND {
+                    return Err(e);
+                }
+                let seq = self.meta_service.increase_id(entity_key::SEQ_PSERVER)?;
+                server.id = Some(seq);
+
+                match self.meta_service.put_kv(
+                    &entity_key::pserver_id(seq).as_str(),
+                    &server.addr.as_bytes(),
+                ) {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                }
+                match self.meta_service.create(&server) {
+                    Ok(_) => {
+                        return Ok(server);
+                    }
+                    Err(e) => {
+                        let e = cast_to_err(e);
+                        if e.0 != ALREADY_EXISTS {
+                            return Err(e);
+                        }
+                        match self.get_server(&server.addr.as_str()) {
+                            Ok(pserver) => {
+                                return Ok(pserver);
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
+        match self
+            .meta_service
+            .get_kv(entity_key::pserver_id(server_id).as_str())
+        {
+            Ok(v) => match String::from_utf8(v) {
+                Ok(v) => Ok(v),
+                Err(e) => Err(err_box(String::from("Invalid server addr UTF-8 sequence "))),
+            },
+            Err(e) => Err(e),
+        }
     }
 
     pub fn list_zones(&self) -> ASResult<Vec<Zone>> {
@@ -372,6 +463,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await
     }
@@ -391,6 +483,7 @@ impl MasterService {
                             partition_id: partition_id,
                             readonly: false,
                             version: version,
+                            replicas: vec![],
                         })
                         .await?;
                 }
@@ -405,6 +498,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await?;
 

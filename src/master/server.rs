@@ -51,7 +51,8 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
             //pserver handler
             .route("/pserver/put", web::post().to(update_pserver))
             .route("/pserver/list", web::get().to(list_pservers))
-            .route("/pserver/heartbeat", web::post().to(heartbeat))
+            .route("/pserver/register", web::post().to(register))
+            .route("/pserver/get_addr_by_id", web::get().to(get_addr))
             //collection handler
             .route("/collection/create", web::post().to(create_collection))
             .route(
@@ -249,19 +250,33 @@ async fn list_pservers(rs: web::Data<Arc<MasterService>>) -> HttpResponse {
     }
 }
 
-async fn heartbeat(rs: web::Data<Arc<MasterService>>, info: web::Json<PServer>) -> HttpResponse {
+async fn get_addr(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> HttpResponse {
+    info!("prepare to get pservers addr by server id");
+
+    let server_id: u32 = req.match_info().get("server_id").unwrap().parse().unwrap();
+    match rs.get_server_addr(server_id) {
+        Ok(s) => success_response(json!({ "addr": s })),
+        Err(e) => {
+            error!("list pserver failed, err: {}", e.to_string());
+            err_response(e)
+        }
+    }
+}
+
+async fn register(rs: web::Data<Arc<MasterService>>, info: web::Json<PServer>) -> HttpResponse {
+    let addr = info.addr.clone();
+    let zone_id = info.zone_id;
     info!(
         "prepare to heartbeat with address {}, zone_id {}",
-        info.addr, info.zone_id
+        addr, zone_id
     );
-
-    let mut ps = match rs.get_server(info.addr.as_str()) {
+    let mut ps = match rs.register(info.into_inner()) {
         Ok(s) => s,
         Err(e) => {
             error!(
                 "get server failed, zone_id:{}, server_addr:{}, err:{}",
-                info.zone_id,
-                info.addr,
+                zone_id,
+                addr,
                 e.to_string()
             );
             return err_response(e);
@@ -419,6 +434,7 @@ fn err_response(e: Box<dyn std::error::Error>) -> HttpResponse {
         .body(e.to_json());
 }
 
-fn success_response<T: Serialize>(result: T) -> HttpResponse {
+fn success_response<T: Serialize + std::fmt::Debug>(result: T) -> HttpResponse {
+    info!("success_response [{:?}]", result);
     HttpResponse::build(http_code(SUCCESS)).json(result)
 }

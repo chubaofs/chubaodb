@@ -26,6 +26,8 @@ pub const ALREADY_EXISTS: u16 = 504;
 pub const ENGINE_WILL_CLOSE: u16 = 505;
 pub const VERSION_ERR: u16 = 506;
 pub const PARTITION_NO_INDEX: u16 = 508;
+pub const ENGINE_NOT_WRITABLE: u16 = 509;
+pub const PARTITION_NOT_LEADER: u16 = 510;
 //cluster_lock
 pub const LOCKED_ALREADY: u16 = 514;
 pub const LOCKED_LEASE_EXPRIED: u16 = 515;

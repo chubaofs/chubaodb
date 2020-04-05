@@ -12,17 +12,47 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
+use crate::pserver::raft::raft::{JimRaftServer, RaftEngine};
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use log::{error, info};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering::SeqCst},
+    mpsc, Arc, Mutex, RwLock,
+};
 use std::thread;
 
+enum Store {
+    Leader(Arc<RaftEngine>, Arc<Simba>),
+    Member(Arc<RaftEngine>),
+    //TODO: READ Only
+}
+
+impl Store {
+    fn is_leader(&self) -> bool {
+        match self {
+            Self::Leader(_, _) => true,
+            _ => false,
+        }
+    }
+
+    fn simba(&self) -> ASResult<Arc<Simba>> {
+        match self {
+            Self::Leader(_, simba) => Ok(simba.clone()),
+            _ => Err(err_code_str_box(
+                PARTITION_NOT_LEADER,
+                "partition not leader",
+            )),
+        }
+    }
+}
+
 pub struct PartitionService {
-    pub simba_map: RwLock<HashMap<(u32, u32), Arc<Simba>>>,
+    pub server_id: AtomicU64,
+    pub simba_map: RwLock<HashMap<(u32, u32), Arc<Store>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,
@@ -31,6 +61,7 @@ pub struct PartitionService {
 impl PartitionService {
     pub fn new(conf: Arc<config::Config>) -> Self {
         PartitionService {
+            server_id: AtomicU64::new(0),
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
@@ -41,8 +72,9 @@ impl PartitionService {
     pub async fn init(&self) -> ASResult<()> {
         let ps = match self
             .meta_client
-            .heartbeat(
+            .register(
                 self.conf.ps.zone_id as u32,
+                None,
                 self.conf.global.ip.as_str(),
                 self.conf.ps.rpc_port as u32,
             )
@@ -51,24 +83,32 @@ impl PartitionService {
             Ok(p) => p,
             Err(e) => {
                 let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
-                    return Err(e);
-                }
                 PServer::new(
                     self.conf.ps.zone_id,
+                    None,
                     format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 )
             }
         };
 
+        match ps.id {
+            Some(id) => self.server_id.store(id as u64, SeqCst),
+            None => {
+                return Err(err_box(format!(
+                    "got id for master has err got:{:?} ",
+                    ps.id
+                )));
+            }
+        }
+
         info!("get_server line:{:?}", ps);
 
         for wp in ps.write_partitions {
-            if let Err(err) = self
-                .init_partition(wp.collection_id, wp.id, false, wp.version)
+            if let Err(e) = self
+                .init_partition(wp.collection_id, wp.id, wp.replicas, false, wp.version)
                 .await
             {
-                error!("init partition has err:{}", err.to_string());
+                error!("init partition has err:{}", e.to_string());
             };
         }
 
@@ -81,6 +121,7 @@ impl PartitionService {
         &self,
         collection_id: u32,
         partition_id: u32,
+        replicas: Vec<Replica>,
         readonly: bool,
         version: u64,
     ) -> ASResult<()> {
@@ -93,6 +134,7 @@ impl PartitionService {
                 .unwrap()
                 .contains_key(&(collection_id, partition_id))
         );
+
         let _ = self.lock.lock().unwrap();
         info!("Start init_partition");
 
@@ -116,37 +158,21 @@ impl PartitionService {
         let partition = Arc::new(Partition {
             id: partition_id,
             collection_id: collection_id,
-            leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port),
+            replicas: replicas,
+            leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port), //TODO: first need set leader.
             version: version + 1,
         });
 
-        match Simba::new(
-            self.conf.clone(),
-            readonly,
-            collection.clone(),
-            partition.clone(),
-        ) {
-            Ok(simba) => {
-                self.simba_map
-                    .write()
-                    .unwrap()
-                    .insert((collection_id, partition_id), simba);
-            }
-            Err(e) => return Err(e),
-        };
+        //first group raft
+        let raft_server =
+            JimRaftServer::get_instance(self.conf.clone(), self.server_id.load(SeqCst));
 
-        if let Err(e) = self.meta_client.update_partition(&partition).await {
-            //if notify master errr, it will rollback
-            if let Err(offe) = self.offload_partition(PartitionRequest {
-                partition_id: partition.id,
-                collection_id: partition.collection_id,
-                readonly: false,
-                version: 0,
-            }) {
-                error!("offload partition:{:?} has err:{:?}", partition, offe);
-            };
-            return Err(e);
-        };
+        let raft = raft_server.create_raft(partition.clone())?;
+
+        self.simba_map.write().unwrap().insert(
+            (collection_id, partition_id),
+            Arc::new(Store::Member(Arc::new(RaftEngine::new(partition, raft)))),
+        );
 
         Ok(())
     }
@@ -183,7 +209,7 @@ impl PartitionService {
             .unwrap()
             .remove(&(req.collection_id, req.partition_id))
         {
-            store.stop();
+            store.simba()?.stop();
             crate::sleep!(300);
             while Arc::strong_count(&store) > 1 {
                 info!(
@@ -194,7 +220,7 @@ impl PartitionService {
                 );
                 crate::sleep!(300);
             }
-            store.release();
+            store.simba()?.release();
         }
         make_general_success()
     }
@@ -207,12 +233,13 @@ impl PartitionService {
             .read()
             .unwrap()
             .values()
-            .filter(|s| !s.readonly())
-            .map(|s| (*s.base.partition).clone())
+            .filter(|s| !s.is_leader())
+            .map(|s| Partition::clone(&*s.simba().unwrap().base.partition))
             .collect::<Vec<Partition>>();
 
         self.meta_client
             .put_pserver(&PServer {
+                id: Some(self.server_id.load(SeqCst) as u32),
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
@@ -228,7 +255,7 @@ impl PartitionService {
             .unwrap()
             .get(&(req.collection_id, req.partition_id))
         {
-            store.clone()
+            store.simba()?.clone()
         } else {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
@@ -252,7 +279,7 @@ impl PartitionService {
         Ok(DocumentResponse {
             code: SUCCESS as i32,
             message: String::from("success"),
-            doc: store.get(req.id.as_str(), req.sort_key.as_str())?,
+            doc: store.simba()?.get(req.id.as_str(), req.sort_key.as_str())?,
         })
     }
 
@@ -266,8 +293,8 @@ impl PartitionService {
 
         for collection_partition_id in req.cpids.iter() {
             let cpid = coding::split_u32(*collection_partition_id);
-            let simba = if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                simba.clone()
+            let simba = if let Some(store) = self.simba_map.read().unwrap().get(&cpid) {
+                store.simba()?.clone()
             } else {
                 return make_not_found_err(cpid.0, cpid.1);
             };
@@ -299,13 +326,17 @@ impl PartitionService {
 
         for cpid in sdreq.cpids.iter() {
             let cpid = coding::split_u32(*cpid);
-            if let Some(simba) = self.simba_map.read().unwrap().get(&cpid) {
-                let simba = simba.clone();
-                let tx = tx.clone();
-                let sdreq = sdreq.clone();
-                thread::spawn(move || {
-                    tx.send(simba.search(sdreq)).unwrap();
-                });
+            if let Some(store) = self.simba_map.read().unwrap().get(&cpid) {
+                if let Ok(simba) = store.simba() {
+                    let simba = simba.clone();
+                    let tx = tx.clone();
+                    let sdreq = sdreq.clone();
+                    thread::spawn(move || {
+                        tx.send(simba.search(sdreq)).unwrap();
+                    });
+                } else {
+                    return make_not_found_err(cpid.0, cpid.1);
+                }
             } else {
                 return make_not_found_err(cpid.0, cpid.1);
             }
