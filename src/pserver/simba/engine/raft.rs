@@ -23,7 +23,6 @@ use jimraft::{
 };
 
 use crate::client::meta_client::MetaClient;
-use log::{error, info, warn};
 use std::boxed::Box;
 use std::mem;
 use std::ops::Deref;
@@ -57,7 +56,7 @@ impl RaftEngine {
         }
     }
 
-    pub fn append<'a, T: 'static>(&self, event: impl Event, callback: T) -> ASResult<()>
+    pub fn append<'a, T: 'static>(&self, event: Event, callback: T) -> ASResult<()>
     where
         T: AppendCallback + 'a,
     {
@@ -66,7 +65,7 @@ impl RaftEngine {
         };
         unsafe {
             self.raft.propose(
-                &LogEvent::from_event(event),
+                &EventCodec::encode(event),
                 1,
                 mem::transmute(Box::new(faced)),
             );
@@ -77,7 +76,12 @@ impl RaftEngine {
     pub fn begin_read_log(&self, start_index: u64) -> ASResult<LogReader> {
         match self.raft.begin_read_log(start_index) {
             Ok(logger) => return Ok(logger),
-            Err(e) => return Err(err_str_box("get raft logger error")),
+            Err(e) => {
+                return Err(err_box(format!(
+                    "get raft logger failure. error:[{}]",
+                    e.to_string()
+                )))
+            }
         }
     }
 
@@ -86,7 +90,7 @@ impl RaftEngine {
 }
 
 pub trait AppendCallback {
-    fn call(&self);
+    fn call(&self, persist_index: u64);
 }
 
 pub struct AppendCallbackFaced {
@@ -94,8 +98,8 @@ pub struct AppendCallbackFaced {
 }
 
 impl AppendCallbackFaced {
-    pub fn call(&self) {
-        self.target.call();
+    pub fn call(&self, persist_index: u64) {
+        self.target.call(persist_index);
     }
 }
 
@@ -104,91 +108,50 @@ pub enum EventType {
     Delete = 2,
 }
 
-pub trait Event {
-    fn serialize(&mut self) -> Vec<u8>;
-    fn get_type(&self) -> EventType;
+pub enum Event {
+    Delete(Vec<u8>),
+    Put(Vec<u8>, Vec<u8>),
 }
 
-pub struct DelEvent {
-    pub k: Vec<u8>,
-}
+pub struct EventCodec {}
 
-impl DelEvent {
-    pub fn de_serialize(data: Vec<u8>) -> Self {
-        Self { k: data }
-    }
-}
-
-impl Event for DelEvent {
-    fn get_type(&self) -> EventType {
-        EventType::Delete
-    }
-
-    fn serialize(&mut self) -> Vec<u8> {
-        let mut result: Vec<u8> = vec![];
-        result.append(u32_slice(self.k.len() as u32).to_vec().as_mut());
-        result.append(self.k.as_mut());
-        result
-    }
-}
-
-pub struct PutEvent {
-    pub k: Vec<u8>,
-    pub v: Vec<u8>,
-}
-
-impl PutEvent {
-    pub fn de_serialize(data: Vec<u8>) -> Self {
-        let (k_len, right) = data.split_at(4);
-        let (k_, right) = right.split_at(slice_u32(k_len) as usize);
-        let (v_len, v_) = right.split_at(4);
-
-        Self {
-            k: k_.to_vec(),
-            v: v_.to_vec(),
-        }
-    }
-}
-
-impl Event for PutEvent {
-    fn get_type(&self) -> EventType {
-        EventType::Put
-    }
-    fn serialize(&mut self) -> Vec<u8> {
-        let mut result: Vec<u8> = vec![];
-        result.append(u32_slice(self.k.len() as u32).to_vec().as_mut());
-        result.append(self.k.as_mut());
-        result.append(u32_slice(self.v.len() as u32).to_vec().as_mut());
-        result.append(self.v.as_mut());
-        result
-    }
-}
-
-pub struct LogEvent {}
-
-impl LogEvent {
-    pub fn from_event(mut event: impl Event) -> Vec<u8> {
+impl EventCodec {
+    pub fn encode(event: Event) -> Vec<u8> {
         let mut result = vec![];
-        result.push(event.get_type() as u8);
-        result.append(event.serialize().as_mut());
+        match event {
+            Event::Delete(mut k) => {
+                result.push(EventType::Delete as u8);
+                result.append(u32_slice(k.len() as u32).to_vec().as_mut());
+                result.append(k.as_mut());
+            }
+            Event::Put(mut k, mut v) => {
+                result.push(EventType::Put as u8);
+                result.append(u32_slice(k.len() as u32).to_vec().as_mut());
+                result.append(k.as_mut());
+                result.append(u32_slice(v.len() as u32).to_vec().as_mut());
+                result.append(v.as_mut());
+            }
+        }
         result
     }
 
-    pub fn to_event(data: Vec<u8>) -> ASResult<Box<dyn Event>> {
+    pub fn decode(data: Vec<u8>) -> ASResult<Event> {
         let (event_type, payload) = data.split_at(1);
         if event_type[0] == EventType::Delete as u8 {
-            return Ok(Box::new(DelEvent::de_serialize(payload.to_vec())));
-        } else if event_type[0] == EventType::Delete as u8 {
-            return Ok(Box::new(PutEvent::de_serialize(payload.to_vec())));
+            let (_k_len, key) = payload.split_at(4);
+            return Ok(Event::Delete(key.to_vec()));
+        } else if event_type[0] == EventType::Put as u8 {
+            let (k_len, right) = payload.split_at(4);
+            let (k, right) = right.split_at(slice_u32(k_len) as usize);
+            let (_v_len, v) = right.split_at(4);
+            return Ok(Event::Put(k.to_vec(), v.to_vec()));
         } else {
             return Err(err_str_box("unrecognized log event"));
         }
     }
 }
 
-pub struct RaftServerFactory {
-    raft_server: Arc<RaftServer>,
-}
+pub struct RaftServerFactory {}
 
 impl RaftServerFactory {
     pub fn get_instance(conf: Arc<config::Config>, node_id: u64) -> Arc<RaftServer> {
@@ -217,7 +180,7 @@ impl StateMachine for SimpleStateMachine {
         self.persisted = result.index;
         unsafe {
             let cb = &mut *(result.tag as *mut AppendCallbackFaced);
-            cb.call();
+            cb.call(result.index);
         }
         Ok(())
     }
@@ -230,28 +193,32 @@ impl StateMachine for SimpleStateMachine {
         Ok(self.persisted)
     }
 
-    fn on_leader_change(&self, leader: u64, term: u64) {
-        //on leader change
-        //self.simba.role_change(leader == self.peer_id);
+    fn on_leader_change(&self, leader: u64, _term: u64) {
+        //TODO may be some error found
+        let _result = self
+            .simba
+            .write()
+            .unwrap()
+            .role_change(leader == self.peer_id);
     }
 
     fn get_snapshot(&self) -> RResult<Snapshot> {
         unimplemented!()
     }
 
-    fn apply_snapshot_start(&self, _context: Vec<u8>, index: u64) -> RResult<()> {
+    fn apply_snapshot_start(&self, _context: Vec<u8>, _index: u64) -> RResult<()> {
         Ok(())
     }
 
-    fn apply_snapshot_data(&self, datas: Vec<Vec<u8>>) -> RResult<()> {
+    fn apply_snapshot_data(&self, _datas: Vec<Vec<u8>>) -> RResult<()> {
         Ok(())
     }
 
-    fn apply_snapshot_finish(&mut self, index: u64) -> RResult<()> {
+    fn apply_snapshot_finish(&mut self, _index: u64) -> RResult<()> {
         Ok(())
     }
 
-    fn apply_read_index(&self, _cmd: Vec<u8>, index: u16) -> RResult<()> {
+    fn apply_read_index(&self, _cmd: Vec<u8>, _index: u16) -> RResult<()> {
         Ok(())
     }
 }
@@ -331,7 +298,7 @@ fn create_peers(partition: &Partition, node_id: u64) -> (u64, Vec<Peer>) {
         if replica.node == node_id as u32 {
             current_peer_id = replica.peer;
         }
-        let mut peer_type = PeerType::NORMAL;
+        let mut peer_type;
         match replica.replica_type {
             ReplicaType::LEARNER => peer_type = PeerType::LEARNER,
             ReplicaType::NORMAL => peer_type = PeerType::NORMAL,

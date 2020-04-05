@@ -31,14 +31,10 @@ use fp_rust::sync::CountDownLatch;
 use log::{error, info, warn};
 use prost::Message;
 use serde_json::Value;
-use std::cmp;
-use std::marker::Send;
 use std::sync::{
     atomic::{AtomicBool, Ordering::SeqCst},
     Arc, RwLock,
 };
-
-use jimraft::raft::LogReader;
 
 pub struct Simba {
     pub conf: Arc<Config>,
@@ -274,14 +270,11 @@ impl Simba {
             self.tantivy.as_ref().unwrap().write(key, value)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
-                PutEvent {
-                    k: key.to_vec(),
-                    v: value.to_vec(),
-                },
+                Event::Put(key.to_vec(), value.to_vec()),
                 WriteRaftCallback {
                     latch: latch.clone(),
                 },
-            );
+            )?;
             latch.wait();
             Ok(())
         } else {
@@ -295,13 +288,12 @@ impl Simba {
             self.tantivy.as_ref().unwrap().delete(key)?;
             let latch = Arc::new(CountDownLatch::new(1));
             self.raft.as_ref().unwrap().append(
-                DelEvent { k: key.to_vec() },
+                Event::Delete(key.to_vec()),
                 WriteRaftCallback {
                     latch: latch.clone(),
                 },
-            );
+            )?;
             latch.wait();
-
             Ok(())
         } else {
             Err(err_code_str_box(ENGINE_NOT_WRITABLE, "engin not writable!"))
@@ -321,7 +313,7 @@ pub struct WriteRaftCallback {
     pub latch: Arc<CountDownLatch>,
 }
 impl AppendCallback for WriteRaftCallback {
-    fn call(&self) {
+    fn call(&self, _persist_index: u64) {
         self.latch.countdown();
     }
 }
@@ -365,78 +357,86 @@ impl Simba {
     }
 
     pub fn release(&self) {
-        //TODO
-        if !self.stoped.load(SeqCst) {}
+        if !self.stoped.load(SeqCst) {
+            //TODO
+        }
         self.raft.as_ref().unwrap().release();
-        self.offload_engine();
+        let _rs = self.offload_engine();
     }
 
-    pub fn role_change(mut self, is_leader: bool) {
+    pub fn role_change(&mut self, is_leader: bool) -> ASResult<()> {
         if !self.stoped.load(SeqCst) {
             let _lock = self.latch.latch_lock(u32::max_value());
 
             if is_leader {
-                self.load_engine();
+                self.load_engine()?;
             } else {
-                self.offload_engine();
+                self.offload_engine()?;
             }
             if self.start_latch.is_some() {
                 self.start_latch.as_ref().as_ref().unwrap().countdown();
             }
         }
+        Ok(())
     }
-    fn offload_engine(&self) {
+    fn offload_engine(&self) -> ASResult<()> {
         self.writable.store(false, SeqCst);
         self.rocksdb.as_ref().unwrap().release();
         self.tantivy.as_ref().unwrap().release();
+        Ok(())
     }
 
-    fn load_engine(&mut self) {
+    fn load_engine(&mut self) -> ASResult<()> {
         let rocksdb = RocksDB::new(BaseEngine::new(&self.base_engine)).unwrap();
         let tantivy = Tantivy::new(BaseEngine::new(&self.base_engine)).unwrap();
         let log_start_index = rocksdb.read_sn().unwrap();
         self.rocksdb = Some(rocksdb);
         self.tantivy = Some(tantivy);
         match self.raft.as_ref().unwrap().begin_read_log(log_start_index) {
-            Ok(logger) => {
-                loop {
-                    match logger.next_log() {
-                        Ok((_, index, data, finished)) => {
-                            let data: Vec<u8> = data.as_bytes().to_vec();
-                            let log_index = index;
-                            if data.len() > 0 {
-                                match LogEvent::to_event(data) {
-                                    Ok(event) => match event.get_type() {
-                                        EventType::Delete => {
-                                            let del = DelEvent {
-                                                k: vec![0, 0, 0, 0],
-                                            }; //event as Box<DelEvent>;
-                                            self.rocksdb.as_ref().unwrap().delete(&del.k.clone());
-                                            self.tantivy.as_ref().unwrap().delete(&del.k.clone());
-                                        }
-                                        EventType::Put => {
-                                            // let put = event as Box<PutEvent>;
-                                            // rocksdb.write(log_index, &put.k.clone(), &put.v.clone());
-                                            // tantivy.write(log_index, &put.k.clone(), &put.v.clone());
-                                        }
-                                    },
-                                    Err(e) => print!("error"),
-                                }
-                            }
-                            self.writable.store(true, SeqCst);
-                            if finished {
-                                logger.end_read_log();
-                                break;
+            Ok(logger) => loop {
+                match logger.next_log() {
+                    Ok((_, _index, data, finished)) => {
+                        let data: Vec<u8> = data;
+                        if data.len() > 0 {
+                            match EventCodec::decode(data) {
+                                Ok(event) => match event {
+                                    Event::Delete(k) => {
+                                        self.rocksdb.as_ref().unwrap().delete(&k.clone())?;
+                                        self.tantivy.as_ref().unwrap().delete(&k.clone())?;
+                                    }
+                                    Event::Put(k, v) => {
+                                        self.rocksdb
+                                            .as_ref()
+                                            .unwrap()
+                                            .write(&k.clone(), &v.clone())?;
+                                        self.tantivy
+                                            .as_ref()
+                                            .unwrap()
+                                            .write(&k.clone(), &v.clone())?;
+                                    }
+                                },
+                                Err(e) => error!("apply raft log error:[{:?}]", e),
                             }
                         }
-                        Err(e) => {
-                            error!("read log error:[{}]", e);
+                        self.writable.store(true, SeqCst);
+                        if finished {
+                            logger.end_read_log()?;
+                            return Ok(());
                         }
                     }
+                    Err(e) => {
+                        error!("read log error:[{}]", e);
+                        return Err(err_box(format!(
+                            "read raft log failure, err[{}]",
+                            e.to_string()
+                        )));
+                    }
                 }
-            }
+                return Ok(());
+            },
             Err(e) => {
                 error!("begin read log error:[{}]", e);
+                return Err(e);
             }
         }
     }

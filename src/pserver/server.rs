@@ -49,7 +49,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), 
 
     let conf = Arc::new(config);
 
-    let mut ps = PartitionService::new(conf.clone());
+    let ps = PartitionService::new(conf.clone());
 
     let now = time::SystemTime::now();
     while let Err(err) = ps.init().await {

@@ -50,9 +50,11 @@ where
     let resp = client_tout(m_timeout).post(url).json(obj).send().await?;
 
     let http_code = resp.status().as_u16();
+    info!("err555555555555555555555");
     if http_code != 200 {
         //try genererr
         let text = resp.text().await?;
+        info!("errrrr666666666666 [{}]", text);
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
             if let Some(code) = value.get("code") {
                 if let Some(message) = value.get("message") {

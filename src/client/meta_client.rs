@@ -36,20 +36,20 @@ impl MetaClient {
         }
     }
 
-    pub async fn put_pserver(&self, pserver: &PServer) -> ASResult<PServer> {
+    pub async fn put_pserver(&self, pserver: &PServer) -> ASResult<()> {
         let url = format!("http://{}/pserver/put", self.conf.master_addr());
-        let server: PServer = http_client::post_json(&url, DEF_TIME_OUT, pserver).await?;
-        Ok(server)
+        http_client::post_json(&url, DEF_TIME_OUT, pserver).await?;
+        Ok(())
     }
 
-    pub async fn heartbeat(
+    pub async fn register(
         &self,
         zone_id: u32,
         ps_id: Option<u64>,
         ip: &str,
         port: u32,
     ) -> ASResult<PServer> {
-        let url = format!("http://{}/pserver/heartbeat", self.conf.master_addr());
+        let url = format!("http://{}/pserver/register", self.conf.master_addr());
         let pserver = PServer::new(zone_id, None, format!("{}:{}", ip, port));
         http_client::post_json(&url, DEF_TIME_OUT, &pserver).await
     }

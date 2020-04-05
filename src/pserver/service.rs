@@ -20,12 +20,12 @@ use log::{error, info};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering::SeqCst},
+    atomic::{AtomicU32, Ordering::SeqCst},
     mpsc, Arc, Mutex, RwLock,
 };
 use std::thread;
 pub struct PartitionService {
-    pub server_id: AtomicI32,
+    pub server_id: AtomicU32,
     pub simba_map: RwLock<HashMap<(u32, u32), Arc<RwLock<Simba>>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
@@ -35,7 +35,7 @@ pub struct PartitionService {
 impl PartitionService {
     pub fn new(conf: Arc<config::Config>) -> Self {
         PartitionService {
-            server_id: AtomicI32::new(0),
+            server_id: AtomicU32::new(0),
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
@@ -46,7 +46,7 @@ impl PartitionService {
     pub async fn init(&self) -> ASResult<()> {
         let ps = match self
             .meta_client
-            .heartbeat(
+            .register(
                 self.conf.ps.zone_id as u32,
                 None,
                 self.conf.global.ip.as_str(),
@@ -65,32 +65,36 @@ impl PartitionService {
             }
         };
 
-        if ps.ps_id.is_none() || ps.ps_id.unwrap() <= 0 {
-            return Err("got id for master has err got:{:?} ", ps.ps_id);
+        if ps.id.is_none() || ps.id.unwrap() <= 0 {
+            return Err(err_box(format!(
+                "got id for master has err got:{:?} ",
+                ps.id
+            )));
         }
 
-        self.server_id.store(ps.ps_id.unwrap(), SeqCst);
+        self.server_id.store(ps.id.unwrap(), SeqCst);
 
         info!("get_server line:{:?}", ps);
-
-        for wp in ps.write_partitions {
-            if let Err(err) = self
-                .init_partition(
-                    wp.collection_id,
-                    wp.id,
-                    wp.replicas,
-                    false,
-                    wp.version,
-                    false,
-                )
-                .await
-            {
-                error!("init partition has err:{}", err.to_string());
-            };
+        let len = ps.write_partitions.len();
+        if len > 0 {
+            for wp in ps.write_partitions {
+                if let Err(err) = self
+                    .init_partition(
+                        wp.collection_id,
+                        wp.id,
+                        wp.replicas,
+                        false,
+                        wp.version,
+                        false,
+                    )
+                    .await
+                {
+                    error!("init partition has err:{}", err.to_string());
+                };
+            }
         }
 
         self.take_heartbeat().await?;
-
         Ok(())
     }
 
@@ -103,6 +107,7 @@ impl PartitionService {
         version: u64,
         wait_for_success: bool,
     ) -> ASResult<()> {
+        info!("begin to load pppppppppppppppppppppppppppp");
         info!(
             "to load partition:{} partition:{} exisit:{}",
             collection_id,
@@ -232,6 +237,7 @@ impl PartitionService {
     }
 
     pub async fn take_heartbeat(&self) -> ASResult<()> {
+        info!("prepare to take heartbeat");
         let _ = self.lock.lock().unwrap();
 
         let wps = self
@@ -245,13 +251,14 @@ impl PartitionService {
 
         self.meta_client
             .put_pserver(&PServer {
-                id: Some(self.load(SeqCst)),
+                id: Some(self.server_id.load(SeqCst)),
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
                 write_partitions: wps,
                 zone_id: self.conf.ps.zone_id,
                 modify_time: 0,
             })
-            .await?
+            .await?;
+        Ok(())
     }
 
     pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<GeneralResponse> {
