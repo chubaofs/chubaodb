@@ -52,7 +52,7 @@ impl Store {
 
 pub struct PartitionService {
     pub server_id: AtomicU64,
-    pub simba_map: RwLock<HashMap<(u32, u32), Arc<Store>>>,
+    simba_map: RwLock<HashMap<(u32, u32), Arc<Store>>>,
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,

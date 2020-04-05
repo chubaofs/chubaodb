@@ -55,7 +55,7 @@ impl JimRaftServer {
     }
 
     pub fn create_raft(&self, partition: Arc<Partition>) -> ASResult<Raft> {
-        let (collection_id, partition_id) = (partition.collection_id, partition.id);
+        let id = merge_u32(partition.collection_id, partition.id);
         let options = RaftOptions::new();
         let (current_peer_id, peers) = self.create_peers(partition);
         let callback: StateMachineCallback = StateMachineCallback {
@@ -64,7 +64,7 @@ impl JimRaftServer {
                 peer_id: current_peer_id,
             }),
         };
-        options.set_id(merge_u32(partition.collection_id, partition.id));
+        options.set_id(id);
         options.set_peers(peers);
         options.set_state_machine(callback);
         options.set_use_memoray_storage(true);
@@ -113,28 +113,31 @@ impl NodeResolver for SimpleNodeResolver {
             return Ok(addr.to_string());
         }
 
+        let addr = || -> RResult<String> {
+            let mut rt = Builder::new()
+                .basic_scheduler()
+                .enable_all()
+                .build()
+                .unwrap();
+            match rt.block_on(self.meta_client.get_server_addr_by_id(node_id)) {
+                Ok(addr) => {
+                    let parts: Vec<&str> = addr.split("_").collect();
+                    Ok(parts[0].to_string())
+                }
+                Err(_) => Err(jimraft::error::err_str(
+                    &format!("get node address error,node id[{}] ", node_id).as_str(),
+                )),
+            }
+        };
+
         let v = self
             .cache
             .write()
             .unwrap()
             .entry(node_id)
-            .or_insert(|| -> String {
-                let mut rt = Builder::new()
-                    .basic_scheduler()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                match rt.block_on(self.meta_client.get_server_addr_by_id(node_id)) {
-                    Ok(addr) => {
-                        let parts: Vec<&str> = addr.split("_").collect();
-                        parts[0].to_string()
-                    }
-                    Err(_) => Err(jimraft::error::err_str(
-                        &format!("get node address error,node id[{}] ", node_id).as_str(),
-                    )),
-                }
-            });
-        return Ok(v.to_string());
+            .or_insert(addr()?)
+            .to_string();
+        return Ok(v);
     }
 }
 
