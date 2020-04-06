@@ -1,3 +1,6 @@
+use crate::client::meta_client::MetaClient;
+use crate::pserver::simba::engine::faiss::Faiss;
+use crate::pserver::simba::simba::Simba;
 use crate::util::entity::Partition;
 use crate::util::{coding::*, config, entity::*, error::*};
 use jimraft::{
@@ -5,13 +8,12 @@ use jimraft::{
     Peer, PeerType, Raft, RaftOptions, RaftServer, RaftServerOptions, Snapshot, StateMachine,
     StateMachineCallback,
 };
-
-use crate::client::meta_client::MetaClient;
+use log::error;
 use std::boxed::Box;
 use std::mem;
 use std::ops::Deref;
-use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::{mpsc::Sender, Arc};
 use tokio::runtime::Builder;
 
 //collection_id, partition_id, leader_id
@@ -27,7 +29,7 @@ impl StateMachine for SimpleStateMachine {
         self.persisted = result.index;
         unsafe {
             let cb = &mut *(result.tag as *mut AppendCallbackFaced);
-            cb.call(result.index);
+            cb.call(result);
         }
         Ok(())
     }
@@ -66,7 +68,7 @@ impl StateMachine for SimpleStateMachine {
 }
 
 pub trait AppendCallback {
-    fn call(&self, persist_index: u64);
+    fn call(&self, result: &CmdResult);
 }
 
 pub struct AppendCallbackFaced {
@@ -74,8 +76,8 @@ pub struct AppendCallbackFaced {
 }
 
 impl AppendCallbackFaced {
-    pub fn call(&self, persist_index: u64) {
-        self.target.call(persist_index);
+    pub fn call(&self, result: &CmdResult) {
+        self.target.call(result);
     }
 }
 
@@ -111,7 +113,7 @@ impl EventCodec {
         result
     }
 
-    pub fn decode(data: Vec<u8>) -> ASResult<Event> {
+    pub fn decode(data: &Vec<u8>) -> ASResult<Event> {
         let (event_type, payload) = data.split_at(1);
         if event_type[0] == EventType::Delete as u8 {
             let (_k_len, key) = payload.split_at(4);
@@ -123,6 +125,44 @@ impl EventCodec {
             return Ok(Event::Put(k.to_vec(), v.to_vec()));
         } else {
             return Err(err_str_box("unrecognized log event"));
+        }
+    }
+}
+
+pub struct WriteRaftCallback {
+    simba: Arc<Simba>,
+    tx: Sender<GenericError>,
+}
+
+impl WriteRaftCallback {
+    pub fn new(tx: Sender<GenericError>, simba: Arc<Simba>) -> WriteRaftCallback {
+        WriteRaftCallback {
+            tx: tx,
+            simba: simba,
+        }
+    }
+
+    fn send_result(&self, ge: GenericError) {
+        if let Err(e) = self.tx.send(ge) {
+            error!("write result has err:{:?}", e); //TODO: if errr
+        };
+    }
+}
+
+impl AppendCallback for WriteRaftCallback {
+    fn call(&self, cmd: &CmdResult) {
+        let resp = if cmd.rep_status.code > 0 {
+            self.send_result(GenericError(
+                INTERNAL_ERR,
+                format!("send raft has code:{}", cmd.rep_status.code),
+            ));
+            return;
+        };
+
+        if let Err(e) = self.simba.do_write(cmd.index, &cmd.data) {
+            self.send_result(err(e.to_string()));
+        } else {
+            return self.send_result(GenericError(SUCCESS, String::default()));
         }
     }
 }

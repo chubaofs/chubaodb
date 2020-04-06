@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-#![feature(atomic_min_max)]
-use crate::pserver::raft::raft::RaftEngine;
+use crate::pserver::raft::{raft::RaftEngine, state_machine::*};
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
     faiss::Faiss,
@@ -29,15 +28,16 @@ use crate::util::{
     error::*,
     time::current_millis,
 };
+use jimraft::CmdResult;
 use log::{error, info, warn};
 use prost::Message;
 use rocksdb::WriteBatch;
 use serde_json::Value;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{
     atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::SeqCst},
     Arc, Mutex, RwLock,
 };
-
 pub struct Simba {
     pub base: Arc<BaseEngine>,
     latch: Latch,
@@ -153,22 +153,22 @@ impl Simba {
         }
     }
 
-    pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<()> {
+    pub fn write(&self, req: WriteDocumentRequest, callback: WriteRaftCallback) -> ASResult<()> {
         let (doc, write_type) = (req.doc.unwrap(), WriteType::from_i32(req.write_type));
 
         match write_type {
-            Some(WriteType::Overwrite) => self._overwrite(doc).await,
-            Some(WriteType::Create) => self._overwrite(doc).await,
-            Some(WriteType::Update) => self._update(doc).await,
-            Some(WriteType::Upsert) => self._upsert(doc).await,
-            Some(WriteType::Delete) => self._delete(doc).await,
+            Some(WriteType::Overwrite) => self._overwrite(doc, callback),
+            Some(WriteType::Create) => self._create(doc, callback),
+            Some(WriteType::Update) => self._update(doc, callback),
+            Some(WriteType::Upsert) => self._upsert(doc, callback),
+            Some(WriteType::Delete) => self._delete(doc, callback),
             Some(_) | None => {
                 return Err(err_box(format!("can not do the handler:{:?}", write_type)));
             }
         }
     }
 
-    async fn _create(&self, mut doc: Document) -> ASResult<()> {
+    fn _create(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
         doc.version = 1;
         let mut buf1 = Vec::new();
@@ -187,10 +187,10 @@ impl Simba {
             return Err(err_box(format!("the document:{:?} already exists", key)));
         }
 
-        self.do_write(&key, &buf1).await
+        self.raft_write(Event::Put(key, buf1), callback)
     }
 
-    async fn _update(&self, mut doc: Document) -> ASResult<()> {
+    fn _update(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let (old_version, key) = (doc.version, doc_key(&doc));
 
         let _lock = self.latch.latch_lock(doc.slot);
@@ -212,10 +212,10 @@ impl Simba {
             return Err(error.into());
         }
 
-        self.do_write(&key, &buf1).await
+        self.raft_write(Event::Put(key, buf1), callback)
     }
 
-    async fn _upsert(&self, mut doc: Document) -> ASResult<()> {
+    fn _upsert(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
         let old = match self.get_by_key(key.as_ref()) {
@@ -242,16 +242,16 @@ impl Simba {
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
-        self.do_write(&key, &buf1).await
+        self.raft_write(Event::Put(key, buf1), callback)
     }
 
-    async fn _delete(&self, doc: Document) -> ASResult<()> {
+    fn _delete(&self, doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_delete(&key).await
+        self.raft_write(Event::Delete(key), callback)
     }
 
-    async fn _overwrite(&self, mut doc: Document) -> ASResult<()> {
+    fn _overwrite(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
         let mut buf1 = Vec::new();
         doc.version = 1;
@@ -259,54 +259,59 @@ impl Simba {
             return Err(error.into());
         }
         let _lock = self.latch.latch_lock(doc.slot);
-        self.do_write(&key, &buf1).await
+        self.raft_write(Event::Put(key, buf1), callback)
     }
 
-    async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        // let iid = iid_coding(general_id);
-        // let mut batch = WriteBatch::default();
-        // batch.put(key, &iid)?;
-        // if self.base.collection.fields.len() == 0 {
-        //     batch.put(iid, value)?;
-        //     return self.rocksdb.write_batch(batch);
-        // }
-
-        // let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
-        // let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
-
-        // if self.base.collection.vector_field_index.len() > 0 {
-        //     let map = source.as_object_mut().unwrap();
-
-        //     for i in self.base.collection.vector_field_index.iter() {
-        //         let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
-        //         if let Some(v) = map.remove(field_name) {
-        //             let index = self.faiss.get_field(field_name)?;
-        //             let vector: Vec<f32> = serde_json::from_value(v)?;
-        //             if index.befor_add(&vector)? {
-        //                 Faiss::start_job(self.rocksdb.clone(), index.clone());
-        //             }
-        //             batch.put(field_coding(field_name, general_id), slice_slice(&vector))?;
-        //         };
-        //     }
-        //     pbdoc.source = serde_json::to_vec(&source)?;
-        //     let mut buf1 = Vec::new();
-        //     if let Err(error) = pbdoc.encode(&mut buf1) {
-        //         return Err(error.into());
-        //     }
-        //     batch.put(iid, &buf1)?;
-        // } else {
-        //     batch.put(iid, value)?;
-        // }
-
-        // self.rocksdb.write_batch(batch)?;
-
-        Ok(())
+    fn raft_write(&self, event: Event, callback: WriteRaftCallback) -> ASResult<()> {
+        self.raft.as_ref().unwrap().append(event, callback)
     }
 
-    async fn do_delete(&self, key: &Vec<u8>) -> ASResult<()> {
-        self.rocksdb.delete(key)?;
-        self.tantivy.delete(key)?;
-        Ok(())
+    pub fn do_write(&self, raft_index: u64, data: &Vec<u8>) -> ASResult<()> {
+        match EventCodec::decode(data)? {
+            Event::Put(key, value) => {
+                let general_id = self.max_iid.fetch_add(1, SeqCst);
+                let iid = iid_coding(general_id);
+                let mut batch = WriteBatch::default();
+                batch.put(key, &iid)?;
+                if self.base.collection.fields.len() == 0 {
+                    batch.put(iid, value)?;
+                    return self.rocksdb.write_batch(batch);
+                }
+
+                let mut pbdoc: Document =
+                    Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
+                let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+                if self.base.collection.vector_field_index.len() > 0 {
+                    let map = source.as_object_mut().unwrap();
+                    for i in self.base.collection.vector_field_index.iter() {
+                        let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
+                        if let Some(v) = map.remove(field_name) {
+                            let index = self.faiss.get_field(field_name)?;
+                            let vector: Vec<f32> = serde_json::from_value(v)?;
+                            if index.befor_add(&vector)? {
+                                Faiss::start_job(self.rocksdb.clone(), index.clone());
+                            }
+                            batch
+                                .put(field_coding(field_name, general_id), slice_slice(&vector))?;
+                        };
+                    }
+                    pbdoc.source = serde_json::to_vec(&source)?;
+                    let mut buf1 = Vec::new();
+                    if let Err(error) = pbdoc.encode(&mut buf1) {
+                        return Err(error.into());
+                    }
+                    batch.put(iid, &buf1)?;
+                } else {
+                    batch.put(iid, value)?;
+                }
+                self.rocksdb.write_batch(batch)?;
+            }
+            Event::Delete(key) => {
+                return self.rocksdb.delete(&key); //TODO other delete
+            }
+        }
+
+        return Ok(());
     }
 
     pub fn readonly(&self) -> bool {

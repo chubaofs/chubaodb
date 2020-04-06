@@ -14,7 +14,7 @@
 use crate::client::meta_client::MetaClient;
 use crate::pserver::raft::{
     raft::{JimRaftServer, RaftEngine},
-    state_machine::MemberChange,
+    state_machine::{MemberChange, WriteRaftCallback},
 };
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
@@ -257,9 +257,11 @@ impl PartitionService {
             loop {
                 match reader.next_log() {
                     Ok((_, raft_index, line, flag)) => {
-                        //TODO::  consumer log
                         if !flag {
                             break;
+                        }
+                        if let Err(e) = simba.do_write(raft_index, &line) {
+                            error!("init raft log has err:{:?} line:{:?}", e, line);
                         }
                     }
                     Err(e) => {
@@ -347,7 +349,7 @@ impl PartitionService {
     }
 
     pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<GeneralResponse> {
-        let store = if let Some(store) = self
+        let simba = if let Some(store) = self
             .simba_map
             .read()
             .unwrap()
@@ -358,8 +360,21 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        store.write(req).await?;
-        make_general_success()
+        let (tx, rx) = mpsc::channel::<GenericError>();
+        let callback = WriteRaftCallback::new(tx, simba.clone());
+
+        simba.write(req, callback)?;
+
+        match rx.recv() {
+            Ok(e) => {
+                if e.0 == SUCCESS {
+                    return make_general_success();
+                } else {
+                    return Err(err_code_box(e.0, e.1));
+                }
+            }
+            Err(e) => return Err(err_box(e.to_string())),
+        }
     }
 
     pub fn get(&self, req: GetDocumentRequest) -> ASResult<DocumentResponse> {
