@@ -142,13 +142,15 @@ impl NodeResolver for SimpleNodeResolver {
 }
 
 pub struct RaftEngine {
+    pub collection: Arc<Collection>,
     pub partition: Arc<Partition>,
     pub raft: Raft,
 }
 
 impl RaftEngine {
-    pub fn new(partition: Arc<Partition>, raft: Raft) -> Self {
+    pub fn new(collection: Arc<Collection>, partition: Arc<Partition>, raft: Raft) -> Self {
         Self {
+            collection: collection,
             partition: partition,
             raft: raft,
         }

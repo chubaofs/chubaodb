@@ -12,7 +12,10 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
-use crate::pserver::raft::raft::{JimRaftServer, RaftEngine};
+use crate::pserver::raft::{
+    raft::{JimRaftServer, RaftEngine},
+    state_machine::MemberChange,
+};
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
@@ -21,7 +24,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering::SeqCst},
-    mpsc, Arc, Mutex, RwLock,
+    mpsc,
+    mpsc::{Receiver, Sender},
+    Arc, Mutex, RwLock,
 };
 use std::thread;
 
@@ -32,7 +37,7 @@ enum Store {
 }
 
 impl Store {
-    fn is_leader(&self) -> bool {
+    fn is_leader_type(&self) -> bool {
         match self {
             Self::Leader(_, _) => true,
             _ => false,
@@ -48,6 +53,19 @@ impl Store {
             )),
         }
     }
+
+    fn raft(&self) -> ASResult<Arc<RaftEngine>> {
+        match self {
+            Self::Leader(raft, _) => Ok(raft.clone()),
+            _ => Err(err_code_str_box(
+                PARTITION_NOT_LEADER,
+                "partition not leader",
+            )),
+            Self::Member(raft) => Ok(raft.clone()),
+        }
+
+        //Err(err_box(format!("can not take to memeber , it may be readoly")))
+    }
 }
 
 pub struct PartitionService {
@@ -56,16 +74,19 @@ pub struct PartitionService {
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,
+    sender: Mutex<Sender<MemberChange>>,
 }
 
 impl PartitionService {
     pub fn new(conf: Arc<config::Config>) -> Self {
+        let (tx, rx) = mpsc::channel::<MemberChange>();
         PartitionService {
             server_id: AtomicU64::new(0),
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
             meta_client: Arc::new(MetaClient::new(conf)),
+            sender: Mutex::new(tx),
         }
     }
 
@@ -171,7 +192,9 @@ impl PartitionService {
 
         self.simba_map.write().unwrap().insert(
             (collection_id, partition_id),
-            Arc::new(Store::Member(Arc::new(RaftEngine::new(partition, raft)))),
+            Arc::new(Store::Member(Arc::new(RaftEngine::new(
+                collection, partition, raft,
+            )))),
         );
 
         Ok(())
@@ -190,6 +213,76 @@ impl PartitionService {
             ));
         }
         Ok(())
+    }
+
+    //type MemberChange = (u64, u64, u64);
+    pub fn member_change(&self, mc: MemberChange) -> ASResult<()> {
+        let (pid, cid, leader_id) = mc;
+        let store = match self
+            .simba_map
+            .read()
+            .unwrap()
+            .get(&(collection_id, partition_id))
+        {
+            Some(store) => store.clone(),
+            None => {
+                return Err(err_box(format!(
+                    "not found partition_id:{} collection_id:{} in server",
+                    pid, cid
+                )));
+            }
+        };
+
+        if self.server_id.load(SeqCst) == leader_id {
+            if store.is_leader_type() {
+                return Ok(());
+            }
+
+            let raft = store.raft()?;
+
+            let simba = Simba::new(
+                self.conf.clone(),
+                false,
+                raft.collection.clone(),
+                raft.partition.clone(),
+            );
+
+            let reader = raft.raft.begin_read_log(git.raft_index())?;
+
+            loop {
+                match reader.next_log() {
+                    Ok((_, raft_index, line, flag)) => {
+                        //TODO::  consumer log
+                        if !flag {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "collection:{} partition:{} got log from raft has err:{:?}",
+                            cid, pid, e
+                        );
+                    }
+                }
+            }
+
+            let store = Store::Leader(store.raft.clone(), Arc::new(simba));
+            self.simba_map
+                .write()
+                .unwrap()
+                .insert((cid, pid), Arc::new(store));
+        } else {
+            if !store.is_leader_type() {
+                return Ok(());
+            }
+            let store = Store::Member(store.raft.clone());
+            self.simba_map
+                .write()
+                .unwrap()
+                .insert((cid, pid), Arc::new(store));
+        }
+
+        return Ok(());
     }
 
     //offload partition , if partition not exist , it will return success
@@ -233,7 +326,7 @@ impl PartitionService {
             .read()
             .unwrap()
             .values()
-            .filter(|s| !s.is_leader())
+            .filter(|s| !s.is_leader_type())
             .map(|s| Partition::clone(&*s.simba().unwrap().base.partition))
             .collect::<Vec<Partition>>();
 

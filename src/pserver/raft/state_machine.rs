@@ -14,6 +14,9 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::runtime::Builder;
 
+//collection_id, partition_id, leader_id
+pub type MemberChange = (u32, u32, u64);
+
 pub struct SimpleStateMachine {
     pub persisted: u64,
     pub peer_id: u64,
