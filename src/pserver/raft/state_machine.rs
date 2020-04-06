@@ -12,16 +12,20 @@ use log::error;
 use std::boxed::Box;
 use std::mem;
 use std::ops::Deref;
-use std::sync::RwLock;
 use std::sync::{mpsc::Sender, Arc};
+use std::sync::{Mutex, RwLock};
 use tokio::runtime::Builder;
 
 //collection_id, partition_id, leader_id
-pub type MemberChange = (u32, u32, u64);
+#[derive(Debug)]
+pub struct MemberChange(pub u32, pub u32, pub u64);
 
 pub struct SimpleStateMachine {
     pub persisted: u64,
     pub peer_id: u64,
+    pub collection_id: u32,
+    pub partition_id: u32,
+    pub sender: Arc<Mutex<Sender<MemberChange>>>,
 }
 
 impl StateMachine for SimpleStateMachine {
@@ -43,7 +47,16 @@ impl StateMachine for SimpleStateMachine {
     }
 
     fn on_leader_change(&self, leader: u64, _term: u64) {
-        //TODO may be some error found
+        if let Err(e) = self.sender.lock().unwrap().send(MemberChange(
+            self.collection_id,
+            self.partition_id,
+            leader,
+        )) {
+            error!(
+                "collection_id:{} partition_id:{} , send change member has err",
+                self.collection_id, self.partition_id
+            );
+        };
     }
 
     fn get_snapshot(&self) -> RResult<Snapshot> {

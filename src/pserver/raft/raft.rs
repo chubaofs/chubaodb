@@ -1,3 +1,5 @@
+use crate::client::meta_client::MetaClient;
+use crate::pserver::raft::state_machine::MemberChange;
 use crate::pserver::raft::state_machine::*;
 use crate::util::entity::Partition;
 use crate::util::{coding::*, config, entity::*, error::*};
@@ -6,14 +8,13 @@ use jimraft::{
     Peer, PeerType, Raft, RaftOptions, RaftServer, RaftServerOptions, Snapshot, StateMachine,
     StateMachineCallback,
 };
-
-use crate::client::meta_client::MetaClient;
 use std::boxed::Box;
 use std::collections::HashMap;
 use std::mem;
 use std::ops::Deref;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use tokio::runtime::Builder;
 
 pub struct JimRaftServer {
@@ -54,17 +55,24 @@ impl JimRaftServer {
         }
     }
 
-    pub fn create_raft(&self, partition: Arc<Partition>) -> ASResult<Raft> {
-        let id = merge_u32(partition.collection_id, partition.id);
+    pub fn create_raft(
+        &self,
+        partition: Arc<Partition>,
+        sender: Arc<Mutex<Sender<MemberChange>>>,
+    ) -> ASResult<Raft> {
+        let (cid, pid) = (partition.collection_id, partition.id);
         let options = RaftOptions::new();
         let (current_peer_id, peers) = self.create_peers(partition);
         let callback: StateMachineCallback = StateMachineCallback {
             target: Box::new(SimpleStateMachine {
                 persisted: 0,
                 peer_id: current_peer_id,
+                collection_id: cid,
+                partition_id: pid,
+                sender: sender,
             }),
         };
-        options.set_id(id);
+        options.set_id(merge_u32(cid, pid));
         options.set_peers(peers);
         options.set_state_machine(callback);
         options.set_use_memoray_storage(true);

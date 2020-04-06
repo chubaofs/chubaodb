@@ -57,11 +57,11 @@ impl Store {
     fn raft(&self) -> ASResult<Arc<RaftEngine>> {
         match self {
             Self::Leader(raft, _) => Ok(raft.clone()),
+            Self::Member(raft) => Ok(raft.clone()),
             _ => Err(err_code_str_box(
                 PARTITION_NOT_LEADER,
                 "raft partition not leader",
             )),
-            Self::Member(raft) => Ok(raft.clone()),
         }
 
         //Err(err_box(format!("can not take to memeber , it may be readoly")))
@@ -74,7 +74,7 @@ pub struct PartitionService {
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,
-    sender: Mutex<Sender<MemberChange>>,
+    sender: Arc<Mutex<Sender<MemberChange>>>,
 }
 
 impl PartitionService {
@@ -86,14 +86,16 @@ impl PartitionService {
             conf: conf.clone(),
             lock: Mutex::new(0),
             meta_client: Arc::new(MetaClient::new(conf)),
-            sender: Mutex::new(tx),
+            sender: Arc::new(Mutex::new(tx)),
         });
 
         let arc_ps = ps.clone();
         thread::spawn(move || {
             for mc in rx {
                 info!("recevie change member:{:?}", mc);
-                arc_ps.member_change(mc);
+                if let Err(e) = arc_ps.member_change(mc) {
+                    error!("change member callback has err:{:?}", e);
+                }
             }
         });
 
@@ -113,12 +115,7 @@ impl PartitionService {
         {
             Ok(p) => p,
             Err(e) => {
-                let e = cast_to_err(e);
-                PServer::new(
-                    self.conf.ps.zone_id,
-                    None,
-                    format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
-                )
+                return Err(err_box(format!("{}", e.to_string())));
             }
         };
 
@@ -198,7 +195,7 @@ impl PartitionService {
         let raft_server =
             JimRaftServer::get_instance(self.conf.clone(), self.server_id.load(SeqCst));
 
-        let raft = raft_server.create_raft(partition.clone())?;
+        let raft = raft_server.create_raft(partition.clone(), self.sender.clone())?;
 
         self.simba_map.write().unwrap().insert(
             (collection_id, partition_id),
@@ -227,7 +224,7 @@ impl PartitionService {
 
     //type MemberChange = (u64, u64, u64);
     pub fn member_change(&self, mc: MemberChange) -> ASResult<()> {
-        let (cid, pid, leader_id) = mc;
+        let (cid, pid, leader_id) = (mc.0, mc.1, mc.2);
         let store = match self.simba_map.read().unwrap().get(&(cid, pid)) {
             Some(store) => store.clone(),
             None => {
