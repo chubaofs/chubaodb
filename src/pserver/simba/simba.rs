@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
+#![feature(atomic_min_max)]
+use crate::pserver::raft::raft::RaftEngine;
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
     faiss::Faiss,
@@ -32,26 +34,26 @@ use prost::Message;
 use rocksdb::WriteBatch;
 use serde_json::Value;
 use std::sync::{
-    atomic::{AtomicBool, Ordering::SeqCst},
+    atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::SeqCst},
     Arc, Mutex, RwLock,
 };
 
 pub struct Simba {
     pub base: Arc<BaseEngine>,
-    readonly: bool,
     latch: Latch,
-    id_locker: Mutex<i64>,
-    max_sn: RwLock<u64>,
+    raft_index: AtomicU64,
+    max_iid: AtomicI64,
     //engins
     rocksdb: Arc<RocksDB>,
     tantivy: Tantivy,
     faiss: Faiss,
+    raft: Option<Arc<RaftEngine>>,
 }
 
 impl Simba {
     pub fn new(
         conf: Arc<config::Config>,
-        readonly: bool,
+        raft: Option<Arc<RaftEngine>>,
         collection: Arc<Collection>,
         partition: Arc<Partition>,
     ) -> ASResult<Arc<Simba>> {
@@ -66,13 +68,14 @@ impl Simba {
         let tantivy = Tantivy::new(base.clone())?;
         let faiss = Faiss::new(base.clone())?;
 
-        let sn = rocksdb.read_sn()?;
+        let raft_index = rocksdb.read_raft_index()?;
+        let max_iid = rocksdb.find_max_iid();
         let simba = Arc::new(Simba {
             base: base,
-            readonly: readonly,
+            raft: raft,
             latch: Latch::new(50000),
-            id_locker: Mutex::new(0),
-            max_sn: RwLock::new(sn),
+            raft_index: AtomicU64::new(raft_index),
+            max_iid: AtomicI64::new(max_iid),
             rocksdb: Arc::new(rocksdb),
             tantivy: tantivy,
             faiss: faiss,
@@ -81,9 +84,6 @@ impl Simba {
         let simba_flush = simba.clone();
 
         tokio::spawn(async move {
-            if readonly {
-                return;
-            }
             info!(
                 "to start commit job for partition:{} begin",
                 simba_flush.base.partition.id
@@ -263,45 +263,42 @@ impl Simba {
     }
 
     async fn do_write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        let mut lock_id = self.id_locker.lock().unwrap();
-        *lock_id += 1;
-        let general_id = *lock_id;
-        let iid = iid_coding(general_id);
-        let mut batch = WriteBatch::default();
-        batch.put(key, &iid)?;
-        if self.base.collection.fields.len() == 0 {
-            batch.put(iid, value)?;
-            return self.rocksdb.write_batch(batch);
-        }
+        // let iid = iid_coding(general_id);
+        // let mut batch = WriteBatch::default();
+        // batch.put(key, &iid)?;
+        // if self.base.collection.fields.len() == 0 {
+        //     batch.put(iid, value)?;
+        //     return self.rocksdb.write_batch(batch);
+        // }
 
-        let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
-        let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+        // let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
+        // let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
 
-        if self.base.collection.vector_field_index.len() > 0 {
-            let map = source.as_object_mut().unwrap();
+        // if self.base.collection.vector_field_index.len() > 0 {
+        //     let map = source.as_object_mut().unwrap();
 
-            for i in self.base.collection.vector_field_index.iter() {
-                let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
-                if let Some(v) = map.remove(field_name) {
-                    let index = self.faiss.get_field(field_name)?;
-                    let vector: Vec<f32> = serde_json::from_value(v)?;
-                    if index.befor_add(&vector)? {
-                        Faiss::start_job(self.rocksdb.clone(), index.clone());
-                    }
-                    batch.put(field_coding(field_name, general_id), slice_slice(&vector))?;
-                };
-            }
-            pbdoc.source = serde_json::to_vec(&source)?;
-            let mut buf1 = Vec::new();
-            if let Err(error) = pbdoc.encode(&mut buf1) {
-                return Err(error.into());
-            }
-            batch.put(iid, &buf1)?;
-        } else {
-            batch.put(iid, value)?;
-        }
+        //     for i in self.base.collection.vector_field_index.iter() {
+        //         let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
+        //         if let Some(v) = map.remove(field_name) {
+        //             let index = self.faiss.get_field(field_name)?;
+        //             let vector: Vec<f32> = serde_json::from_value(v)?;
+        //             if index.befor_add(&vector)? {
+        //                 Faiss::start_job(self.rocksdb.clone(), index.clone());
+        //             }
+        //             batch.put(field_coding(field_name, general_id), slice_slice(&vector))?;
+        //         };
+        //     }
+        //     pbdoc.source = serde_json::to_vec(&source)?;
+        //     let mut buf1 = Vec::new();
+        //     if let Err(error) = pbdoc.encode(&mut buf1) {
+        //         return Err(error.into());
+        //     }
+        //     batch.put(iid, &buf1)?;
+        // } else {
+        //     batch.put(iid, value)?;
+        // }
 
-        self.rocksdb.write_batch(batch)?;
+        // self.rocksdb.write_batch(batch)?;
 
         Ok(())
     }
@@ -313,7 +310,7 @@ impl Simba {
     }
 
     pub fn readonly(&self) -> bool {
-        return self.readonly;
+        return false; //TODO: FIX ME
     }
 }
 
@@ -344,7 +341,7 @@ impl Simba {
                 error!("rocksdb flush has err:{:?}", e);
             }
 
-            if let Err(e) = self.rocksdb.write_sn(0) {
+            if let Err(e) = self.rocksdb.write_raft_index(0) {
                 error!("write has err :{:?}", e);
             };
 
@@ -375,15 +372,12 @@ impl Simba {
         }
     }
 
-    pub fn get_sn(&self) -> u64 {
-        *self.max_sn.read().unwrap()
+    pub fn get_raft_index(&self) -> u64 {
+        self.raft_index.load(SeqCst)
     }
 
-    pub fn set_sn_if_max(&self, sn: u64) {
-        let mut v = self.max_sn.write().unwrap();
-        if *v < sn {
-            *v = sn;
-        }
+    pub fn set_raft_index(&self, raft_index: u64) {
+        self.raft_index.store(raft_index, SeqCst);
     }
 }
 

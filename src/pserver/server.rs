@@ -78,11 +78,11 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), 
 }
 
 pub struct RPCService {
-    service: PartitionService,
+    service: Arc<PartitionService>,
 }
 
 impl RPCService {
-    fn new(ps: PartitionService) -> Self {
+    fn new(ps: Arc<PartitionService>) -> Self {
         RPCService { service: ps }
     }
 }

@@ -78,16 +78,26 @@ pub struct PartitionService {
 }
 
 impl PartitionService {
-    pub fn new(conf: Arc<config::Config>) -> Self {
+    pub fn new(conf: Arc<config::Config>) -> Arc<Self> {
         let (tx, rx) = mpsc::channel::<MemberChange>();
-        PartitionService {
+        let ps = Arc::new(PartitionService {
             server_id: AtomicU64::new(0),
             simba_map: RwLock::new(HashMap::new()),
             conf: conf.clone(),
             lock: Mutex::new(0),
             meta_client: Arc::new(MetaClient::new(conf)),
             sender: Mutex::new(tx),
-        }
+        });
+
+        let arc_ps = ps.clone();
+        thread::spawn(move || {
+            for mc in rx {
+                info!("recevie change member:{:?}", mc);
+                arc_ps.member_change(mc);
+            }
+        });
+
+        ps
     }
 
     pub async fn init(&self) -> ASResult<()> {
@@ -217,18 +227,13 @@ impl PartitionService {
 
     //type MemberChange = (u64, u64, u64);
     pub fn member_change(&self, mc: MemberChange) -> ASResult<()> {
-        let (pid, cid, leader_id) = mc;
-        let store = match self
-            .simba_map
-            .read()
-            .unwrap()
-            .get(&(collection_id, partition_id))
-        {
+        let (cid, pid, leader_id) = mc;
+        let store = match self.simba_map.read().unwrap().get(&(cid, pid)) {
             Some(store) => store.clone(),
             None => {
                 return Err(err_box(format!(
                     "not found partition_id:{} collection_id:{} in server",
-                    pid, cid
+                    cid, pid
                 )));
             }
         };
@@ -242,12 +247,12 @@ impl PartitionService {
 
             let simba = Simba::new(
                 self.conf.clone(),
-                false,
+                Some(raft.clone()),
                 raft.collection.clone(),
                 raft.partition.clone(),
-            );
+            )?;
 
-            let reader = raft.raft.begin_read_log(git.raft_index())?;
+            let reader = raft.raft.begin_read_log(simba.get_raft_index())?;
 
             loop {
                 match reader.next_log() {
@@ -266,7 +271,7 @@ impl PartitionService {
                 }
             }
 
-            let store = Store::Leader(store.raft.clone(), Arc::new(simba));
+            let store = Store::Leader(store.raft()?, simba);
             self.simba_map
                 .write()
                 .unwrap()
@@ -275,7 +280,7 @@ impl PartitionService {
             if !store.is_leader_type() {
                 return Ok(());
             }
-            let store = Store::Member(store.raft.clone());
+            let store = Store::Member(store.raft()?);
             self.simba_map
                 .write()
                 .unwrap()

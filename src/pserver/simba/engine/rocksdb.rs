@@ -13,7 +13,7 @@
 // permissions and limitations under the License.
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
 use crate::util::{
-    coding::{slice_u64, u64_slice, SN_KEY},
+    coding::{slice_i64, slice_u64, u64_slice, RAFT_INDEX_KEY},
     error::*,
 };
 use log::{error, info};
@@ -78,19 +78,31 @@ impl RocksDB {
             .unwrap_or(0))
     }
 
-    pub fn write_sn(&self, db_sn: u64) -> ASResult<()> {
+    pub fn write_raft_index(&self, raft_index: u64) -> ASResult<()> {
         let write_options = WriteOptions::default();
         let mut batch = WriteBatch::default();
-        batch.put(SN_KEY, &u64_slice(db_sn)[..])?;
+        batch.put(RAFT_INDEX_KEY, &u64_slice(raft_index)[..])?;
         convert(self.db.write_opt(batch, &write_options))?;
         Ok(())
     }
 
-    pub fn read_sn(&self) -> ASResult<u64> {
-        match self.db.get(SN_KEY)? {
+    pub fn read_raft_index(&self) -> ASResult<u64> {
+        match self.db.get(RAFT_INDEX_KEY)? {
             Some(bs) => Ok(slice_u64(bs.as_slice())),
             None => Ok(0),
         }
+    }
+
+    pub fn find_max_iid(&self) -> i64 {
+        let iter = self
+            .db
+            .iterator(IteratorMode::From(&vec![1], Direction::Reverse)); // From a key in Direction::{forward,reverse}
+
+        for (k, _) in iter {
+            return slice_i64(&k);
+        }
+
+        return 0;
     }
 
     // query rocksdb range key ,  the range key > prefix , end  ,
