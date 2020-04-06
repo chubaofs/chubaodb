@@ -49,7 +49,7 @@ impl Store {
             Self::Leader(_, simba) => Ok(simba.clone()),
             _ => Err(err_code_str_box(
                 PARTITION_NOT_LEADER,
-                "partition not leader",
+                "simba partition not leader",
             )),
         }
     }
@@ -59,7 +59,7 @@ impl Store {
             Self::Leader(raft, _) => Ok(raft.clone()),
             _ => Err(err_code_str_box(
                 PARTITION_NOT_LEADER,
-                "partition not leader",
+                "raft partition not leader",
             )),
             Self::Member(raft) => Ok(raft.clone()),
         }
