@@ -63,8 +63,6 @@ impl Store {
                 "raft partition not leader",
             )),
         }
-
-        //Err(err_box(format!("can not take to memeber , it may be readoly")))
     }
 }
 
@@ -249,26 +247,26 @@ impl PartitionService {
                 raft.partition.clone(),
             )?;
 
-            let reader = raft.raft.begin_read_log(simba.get_raft_index())?;
+            // let reader = raft.raft.begin_read_log(simba.get_raft_index())?;
 
-            loop {
-                match reader.next_log() {
-                    Ok((_, raft_index, line, flag)) => {
-                        if !flag {
-                            break;
-                        }
-                        if let Err(e) = simba.do_write(raft_index, &line) {
-                            error!("init raft log has err:{:?} line:{:?}", e, line);
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "collection:{} partition:{} got log from raft has err:{:?}",
-                            cid, pid, e
-                        );
-                    }
-                }
-            }
+            // loop {
+            //     match reader.next_log() {
+            //         Ok((_, raft_index, line, flag)) => {
+            //             if !flag {
+            //                 break;
+            //             }
+            //             if let Err(e) = simba.do_write(raft_index, &line) {
+            //                 error!("init raft log has err:{:?} line:{:?}", e, line);
+            //             }
+            //         }
+            //         Err(e) => {
+            //             error!(
+            //                 "collection:{} partition:{} got log from raft has err:{:?}",
+            //                 cid, pid, e
+            //             );
+            //         }
+            //     }
+            // }
 
             let store = Store::Leader(store.raft()?, simba);
             self.simba_map
@@ -329,10 +327,12 @@ impl PartitionService {
             .simba_map
             .read()
             .unwrap()
-            .values()
-            .filter(|s| !s.is_leader_type())
-            .map(|s| Partition::clone(&*s.simba().unwrap().base.partition))
+            .iter()
+            .filter(|(_, s)| s.is_leader_type())
+            .map(|(_, s)| Partition::clone(&*s.simba().unwrap().base.partition))
             .collect::<Vec<Partition>>();
+
+        println!("=============================++++++++++++++++++ {:?}", wps);
 
         self.meta_client
             .put_pserver(&PServer {

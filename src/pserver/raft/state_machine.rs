@@ -53,8 +53,8 @@ impl StateMachine for SimpleStateMachine {
             leader,
         )) {
             error!(
-                "collection_id:{} partition_id:{} , send change member has err",
-                self.collection_id, self.partition_id
+                "collection_id:{} partition_id:{} , send change member has err:{:?}",
+                self.collection_id, self.partition_id, e
             );
         };
     }

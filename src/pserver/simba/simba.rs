@@ -83,7 +83,7 @@ impl Simba {
 
         let simba_flush = simba.clone();
 
-        tokio::spawn(async move {
+        std::thread::spawn(move || {
             info!(
                 "to start commit job for partition:{} begin",
                 simba_flush.base.partition.id
@@ -332,25 +332,25 @@ impl Simba {
 
             //TODO: check pre_sn < current sn , and set
 
-            let begin = current_millis();
+            // let begin = current_millis();
 
-            if let Err(e) = self.rocksdb.flush() {
-                error!("rocksdb flush has err:{:?}", e);
-            }
+            // if let Err(e) = self.rocksdb.flush() {
+            //     error!("rocksdb flush has err:{:?}", e);
+            // }
 
-            if let Err(e) = self.tantivy.flush() {
-                error!("rocksdb flush has err:{:?}", e);
-            }
+            // if let Err(e) = self.tantivy.flush() {
+            //     error!("rocksdb flush has err:{:?}", e);
+            // }
 
-            if let Err(e) = self.faiss.flush() {
-                error!("rocksdb flush has err:{:?}", e);
-            }
+            // if let Err(e) = self.faiss.flush() {
+            //     error!("rocksdb flush has err:{:?}", e);
+            // }
 
-            if let Err(e) = self.rocksdb.write_raft_index(0) {
-                error!("write has err :{:?}", e);
-            };
+            // if let Err(e) = self.rocksdb.write_raft_index(0) {
+            //     error!("write has err :{:?}", e);
+            // };
 
-            info!("flush job ok use time:{}ms", current_millis() - begin);
+            // info!("flush job ok use time:{}ms", current_millis() - begin);
         }
         Ok(())
     }
