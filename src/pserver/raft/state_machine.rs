@@ -1,6 +1,7 @@
 use crate::client::meta_client::MetaClient;
 use crate::pserver::simba::engine::faiss::Faiss;
 use crate::pserver::simba::simba::Simba;
+use crate::util::coding::i64_slice;
 use crate::util::entity::Partition;
 use crate::util::{coding::*, config, entity::*, error::*};
 use jimraft::{
@@ -95,49 +96,68 @@ impl AppendCallbackFaced {
 }
 
 pub enum EventType {
-    Put = 1,
-    Delete = 2,
+    Delete = 0,
+    Create = 1,
+    Update = 2,
 }
 
 pub enum Event {
-    Delete(Vec<u8>),
-    Put(Vec<u8>, Vec<u8>),
+    //key+ old_id+ 0
+    Delete(Vec<u8>, Vec<u8>),
+    //value+ key + len(key)+1
+    Create(Vec<u8>, Vec<u8>),
+    //value + key + len(k) + iid + 2
+    Update(Vec<u8>, Vec<u8>, Vec<u8>),
 }
 
 pub struct EventCodec {}
 
 impl EventCodec {
     pub fn encode(event: Event) -> Vec<u8> {
-        let mut result = vec![];
         match event {
-            Event::Delete(mut k) => {
-                result.push(EventType::Delete as u8);
-                result.append(u32_slice(k.len() as u32).to_vec().as_mut());
-                result.append(k.as_mut());
+            Event::Delete(mut iid, mut k) => {
+                k.reserve(k.len() + iid.len() + 1 - k.capacity());
+                k.extend_from_slice(&k);
+                k.extend_from_slice(&iid);
+                k.push(EventType::Delete as u8);
+                k
             }
-            Event::Put(mut k, mut v) => {
-                result.push(EventType::Put as u8);
-                result.append(u32_slice(k.len() as u32).to_vec().as_mut());
-                result.append(k.as_mut());
-                result.append(u32_slice(v.len() as u32).to_vec().as_mut());
-                result.append(v.as_mut());
+            Event::Create(mut k, mut v) => {
+                v.reserve(v.len() + k.len() + 3 - v.capacity());
+                v.extend_from_slice(&k);
+                v.extend_from_slice(&u16_slice(k.len() as u16)[..]);
+                v.push(EventType::Create as u8);
+                v
+            }
+            Event::Update(mut iid, mut k, mut v) => {
+                v.reserve(v.len() + k.len() + 11 - v.capacity());
+                v.extend_from_slice(&k);
+                v.extend_from_slice(&u16_slice(k.len() as u16)[..]);
+                v.extend_from_slice(&iid);
+                v.push(EventType::Update as u8);
+                v
             }
         }
-        result
     }
 
-    pub fn decode(data: &Vec<u8>) -> ASResult<Event> {
-        let (event_type, payload) = data.split_at(1);
-        if event_type[0] == EventType::Delete as u8 {
-            let (_k_len, key) = payload.split_at(4);
-            return Ok(Event::Delete(key.to_vec()));
-        } else if event_type[0] == EventType::Put as u8 {
-            let (k_len, right) = payload.split_at(4);
-            let (k, right) = right.split_at(slice_u32(k_len) as usize);
-            let (_v_len, v) = right.split_at(4);
-            return Ok(Event::Put(k.to_vec(), v.to_vec()));
-        } else {
-            return Err(err_str_box("unrecognized log event"));
+    //iid  key value
+    pub fn decode<'a>(data: &'a Vec<u8>) -> (&'a [u8], &'a [u8], &'a [u8]) {
+        static empty :&'static [u8] = [],
+        //key+ old_id+ 0
+        //value+ key + len(key)+1
+        //value + key + len(k) + iid + 2
+        let len = data.len() - 1;
+        match data[len] {
+            0 => (&data[len - 8..len], &data[..len - 8], empty),
+            1 => {
+                let key_len = slice_u16(data(len-2..len));
+                (empty, &data[len-key_len..len], &data[..len-key_len])
+            }
+            2 => {
+                let key_len = slice_u16(data(len-10..len-8));
+                (&data[len-8..len], &data[len-key_len-10..len-10], &data[..len-key_len-10])
+            }
+            _ => panic!("decode has err type:{}", data[len]),
         }
     }
 }
@@ -178,4 +198,15 @@ impl AppendCallback for WriteRaftCallback {
             return self.send_result(GenericError(SUCCESS, String::default()));
         }
     }
+}
+
+#[test]
+fn test_EventCodec(){
+    use crate::util::coding::i64_slice ;
+    let key = &String::from("test_key")[..];
+    let value = &String::from("test_value")[..] ;
+    let iid =  i64_slice(123)[..];
+    let event = Event::Create(key,value) ;
+    let value = EventCodec::encode(event) ;
+    println!("{:?}",value) ;
 }

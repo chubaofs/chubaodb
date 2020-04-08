@@ -31,6 +31,7 @@ use crate::util::{
 use jimraft::CmdResult;
 use log::{error, info, warn};
 use prost::Message;
+use roaring::RoaringBitmap;
 use rocksdb::WriteBatch;
 use serde_json::Value;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -43,6 +44,7 @@ pub struct Simba {
     latch: Latch,
     raft_index: AtomicU64,
     max_iid: AtomicI64,
+    del_map: RoaringBitmap,
     //engins
     rocksdb: Arc<RocksDB>,
     tantivy: Tantivy,
@@ -76,6 +78,7 @@ impl Simba {
             latch: Latch::new(50000),
             raft_index: AtomicU64::new(raft_index),
             max_iid: AtomicI64::new(max_iid),
+            del_map: RoaringBitmap::new(),
             rocksdb: Arc::new(rocksdb),
             tantivy: tantivy,
             faiss: faiss,
@@ -187,7 +190,7 @@ impl Simba {
             return Err(err_box(format!("the document:{:?} already exists", key)));
         }
 
-        self.raft_write(Event::Put(key, buf1), callback)
+        self.raft_write(Event::Create(key, buf1), callback)
     }
 
     fn _update(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
@@ -212,7 +215,7 @@ impl Simba {
             return Err(error.into());
         }
 
-        self.raft_write(Event::Put(key, buf1), callback)
+        self.raft_write(Event::Update(key, buf1), callback)
     }
 
     fn _upsert(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
@@ -311,6 +314,8 @@ impl Simba {
             }
         }
 
+        self.raft_index.store(raft_index, SeqCst);
+
         return Ok(());
     }
 
@@ -330,27 +335,32 @@ impl Simba {
         while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
 
-            //TODO: check pre_sn < current sn , and set
+            num += 1;
 
-            // let begin = current_millis();
+            let begin = current_millis();
 
-            // if let Err(e) = self.rocksdb.flush() {
-            //     error!("rocksdb flush has err:{:?}", e);
-            // }
+            if num % rocksdb_flush_ratio == 0 {
+                if let Err(e) = self.rocksdb.write_raft_index(self.raft_index.load(SeqCst)) {
+                    error!("write has err :{:?}", e);
+                };
+                if let Err(e) = self.rocksdb.flush() {
+                    error!("rocksdb flush has err:{:?}", e);
+                }
+            }
 
-            // if let Err(e) = self.tantivy.flush() {
-            //     error!("rocksdb flush has err:{:?}", e);
-            // }
+            if num % tantivy_flush_ratio == 0 {
+                if let Err(e) = self.tantivy.flush() {
+                    error!("rocksdb flush has err:{:?}", e);
+                }
+            }
 
-            // if let Err(e) = self.faiss.flush() {
-            //     error!("rocksdb flush has err:{:?}", e);
-            // }
+            if num % faiss_flush_ratio == 0 {
+                if let Err(e) = self.faiss.flush() {
+                    error!("rocksdb flush has err:{:?}", e);
+                }
+            }
 
-            // if let Err(e) = self.rocksdb.write_raft_index(0) {
-            //     error!("write has err :{:?}", e);
-            // };
-
-            // info!("flush job ok use time:{}ms", current_millis() - begin);
+            info!("flush job ok use time:{}ms", current_millis() - begin);
         }
         Ok(())
     }

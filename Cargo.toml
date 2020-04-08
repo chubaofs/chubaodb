@@ -38,6 +38,7 @@ faiss4rs = { git = "https://github.com/ansjsun/rust-faiss" }
 jimraft = { path = "../rust-jimraft", version = "0.1.0" }
 libc = "0.2.9"
 rand = "0.7.3"
+roaring = "0.6.0"
 
 [build-dependencies]
 tonic-build = "0.1.1"

@@ -332,8 +332,6 @@ impl PartitionService {
             .map(|(_, s)| Partition::clone(&*s.simba().unwrap().base.partition))
             .collect::<Vec<Partition>>();
 
-        println!("=============================++++++++++++++++++ {:?}", wps);
-
         self.meta_client
             .put_pserver(&PServer {
                 id: Some(self.server_id.load(SeqCst) as u32),

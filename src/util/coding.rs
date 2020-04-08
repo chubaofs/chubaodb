@@ -23,6 +23,12 @@ pub fn hash_str(v: &str) -> u64 {
 	s.finish()
 }
 
+pub fn slice_u16(pack_data: &[u8]) -> u16 {
+	let mut v: [u8; 4] = Default::default();
+	v.copy_from_slice(pack_data);
+	fix_size_u16(v)
+}
+
 //it is not
 pub fn slice_u32(pack_data: &[u8]) -> u32 {
 	let mut v: [u8; 4] = Default::default();
@@ -42,6 +48,10 @@ pub fn slice_i64(pack_data: &[u8]) -> i64 {
 	fix_slice_i64(v)
 }
 
+pub fn fix_slice_u16(v: [u8; 2]) -> u16 {
+	u16::from_be_bytes(v)
+}
+
 pub fn fix_slice_u32(v: [u8; 4]) -> u32 {
 	u32::from_be_bytes(v)
 }
@@ -59,6 +69,10 @@ pub fn u32_slice(value: u32) -> [u8; 4] {
 }
 
 pub fn u64_slice(value: u64) -> [u8; 8] {
+	value.to_be_bytes()
+}
+
+pub fn u16_slice(value: u16) -> [u8; 2] {
 	value.to_be_bytes()
 }
 
