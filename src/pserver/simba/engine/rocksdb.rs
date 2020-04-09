@@ -61,7 +61,7 @@ impl RocksDB {
         Ok(())
     }
 
-    pub fn delete(&self, key: &Vec<u8>) -> ASResult<()> {
+    pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> ASResult<()> {
         let mut write_options = WriteOptions::default();
         write_options.disable_wal(true);
         write_options.set_sync(false);

@@ -79,7 +79,7 @@ impl IndexField {
         self.index.read().unwrap().add_with_ids(ids, data)
     }
 
-    fn search(&self, queries: &Vec<f32>, size: i32) -> ASResult<(Vec<i64>, Vec<f32>)> {
+    fn _search(&self, queries: &Vec<f32>, size: i32) -> ASResult<(Vec<i64>, Vec<f32>)> {
         let num_query = queries.len() as i32 / self.dimension;
         Ok(self.index.read().unwrap().search(size, num_query, queries))
     }
@@ -289,12 +289,12 @@ impl Engine for Faiss {
     }
 
     fn release(&self) {
-        for (f, i) in self.fields.iter() {
+        for (_f, i) in self.fields.iter() {
             i.stop(false);
         }
 
         //take twoice
-        for (f, i) in self.fields.iter() {
+        for (_f, i) in self.fields.iter() {
             i.stop(true);
         }
 

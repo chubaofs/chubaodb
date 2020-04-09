@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering::SeqCst},
     mpsc,
-    mpsc::{Receiver, Sender},
+    mpsc::Sender,
     Arc, Mutex, RwLock,
 };
 use std::thread;
@@ -33,7 +33,7 @@ use std::thread;
 enum Store {
     Leader(Arc<RaftEngine>, Arc<Simba>),
     Member(Arc<RaftEngine>),
-    //TODO: READ Only
+    _Reader(Arc<Simba>),
 }
 
 impl Store {
@@ -105,7 +105,6 @@ impl PartitionService {
             .meta_client
             .register(
                 self.conf.ps.zone_id as u32,
-                None,
                 self.conf.global.ip.as_str(),
                 self.conf.ps.rpc_port as u32,
             )
@@ -148,7 +147,7 @@ impl PartitionService {
         collection_id: u32,
         partition_id: u32,
         replicas: Vec<Replica>,
-        readonly: bool,
+        _readonly: bool,
         version: u64,
     ) -> ASResult<()> {
         info!(

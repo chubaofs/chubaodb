@@ -28,23 +28,21 @@ use crate::util::{
     error::*,
     time::current_millis,
 };
-use jimraft::CmdResult;
 use log::{error, info, warn};
 use prost::Message;
 use roaring::RoaringBitmap;
 use rocksdb::WriteBatch;
 use serde_json::Value;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{
     atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::SeqCst},
-    Arc, Mutex, RwLock,
+    Arc, RwLock,
 };
 pub struct Simba {
     pub base: Arc<BaseEngine>,
     latch: Latch,
     raft_index: AtomicU64,
     max_iid: AtomicI64,
-    del_map: RoaringBitmap,
+    del_map: RwLock<RoaringBitmap>,
     //engins
     rocksdb: Arc<RocksDB>,
     tantivy: Tantivy,
@@ -78,7 +76,7 @@ impl Simba {
             latch: Latch::new(50000),
             raft_index: AtomicU64::new(raft_index),
             max_iid: AtomicI64::new(max_iid),
-            del_map: RoaringBitmap::new(),
+            del_map: RwLock::new(RoaringBitmap::new()),
             rocksdb: Arc::new(rocksdb),
             tantivy: tantivy,
             faiss: faiss,
@@ -107,10 +105,10 @@ impl Simba {
         Ok(simba)
     }
     pub fn get(&self, id: &str, sort_key: &str) -> ASResult<Vec<u8>> {
-        self.get_by_key(key_coding(id, sort_key).as_ref())
+        Ok(self.get_by_key(key_coding(id, sort_key).as_ref())?.1)
     }
 
-    fn get_by_key(&self, key: &Vec<u8>) -> ASResult<Vec<u8>> {
+    fn get_by_key(&self, key: &Vec<u8>) -> ASResult<(Vec<u8>, Vec<u8>)> {
         let iid = match self.rocksdb.db.get(key) {
             Ok(ov) => match ov {
                 Some(v) => v,
@@ -119,9 +117,9 @@ impl Simba {
             Err(e) => return Err(err_box(format!("get key has err:{}", e.to_string()))),
         };
 
-        match self.rocksdb.db.get(iid) {
+        match self.rocksdb.db.get(&iid) {
             Ok(ov) => match ov {
-                Some(v) => Ok(v),
+                Some(v) => Ok((iid, v)),
                 None => Err(err_code_str_box(NOT_FOUND, "iid not found!")),
             },
             Err(e) => Err(err_box(format!("get iid has err:{}", e.to_string()))),
@@ -160,7 +158,7 @@ impl Simba {
         let (doc, write_type) = (req.doc.unwrap(), WriteType::from_i32(req.write_type));
 
         match write_type {
-            Some(WriteType::Overwrite) => self._overwrite(doc, callback),
+            Some(WriteType::Overwrite) => self._put(doc, callback),
             Some(WriteType::Create) => self._create(doc, callback),
             Some(WriteType::Update) => self._update(doc, callback),
             Some(WriteType::Upsert) => self._upsert(doc, callback),
@@ -197,7 +195,9 @@ impl Simba {
         let (old_version, key) = (doc.version, doc_key(&doc));
 
         let _lock = self.latch.latch_lock(doc.slot);
-        let old = self.get(doc.id.as_str(), doc.sort_key.as_str())?;
+
+        let (old_iid, old) =
+            self.get_by_key(&key_coding(doc.id.as_str(), doc.sort_key.as_str()))?;
         let old: Document = Message::decode(prost::bytes::Bytes::from(old))?;
         if old_version > 0 && old.version != old_version {
             return Err(err_code_box(
@@ -208,6 +208,7 @@ impl Simba {
                 ),
             ));
         }
+
         merge_doc(&mut doc, old)?;
         doc.version += old_version + 1;
         let mut buf1 = Vec::new();
@@ -215,7 +216,7 @@ impl Simba {
             return Err(error.into());
         }
 
-        self.raft_write(Event::Update(key, buf1), callback)
+        self.raft_write(Event::Update(old_iid, key, buf1), callback)
     }
 
     fn _upsert(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
@@ -233,36 +234,63 @@ impl Simba {
             }
         };
 
-        if let Some(old) = old {
+        let event: Event;
+        if let Some((iid, old)) = old {
             let old: Document = Message::decode(prost::bytes::Bytes::from(old))?;
             doc.version = old.version + 1;
             merge_doc(&mut doc, old)?;
+
+            let mut buf1 = Vec::new();
+            if let Err(error) = doc.encode(&mut buf1) {
+                return Err(error.into());
+            }
+
+            event = Event::Update(iid, key, buf1);
         } else {
             doc.version = 1;
+            let mut buf1 = Vec::new();
+            if let Err(error) = doc.encode(&mut buf1) {
+                return Err(error.into());
+            }
+            event = Event::Create(key, buf1);
         }
 
-        let mut buf1 = Vec::new();
-        if let Err(error) = doc.encode(&mut buf1) {
-            return Err(error.into());
-        }
-        self.raft_write(Event::Put(key, buf1), callback)
+        self.raft_write(event, callback)
     }
 
     fn _delete(&self, doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        self.raft_write(Event::Delete(key), callback)
+
+        let iid = match self.rocksdb.db.get(&key) {
+            Ok(ov) => match ov {
+                Some(v) => v,
+                None => return Err(err_code_box(NOT_FOUND, format!("id:{:?} not found!", key))),
+            },
+            Err(e) => return Err(err_box(format!("get key has err:{}", e.to_string()))),
+        };
+
+        self.raft_write(Event::Delete(iid, key), callback)
     }
 
-    fn _overwrite(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
+    fn _put(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
+        let _lock = self.latch.latch_lock(doc.slot);
+        let iid = match self.rocksdb.db.get(&key) {
+            Ok(iid) => iid,
+            Err(e) => return Err(err_box(format!("get key has err:{}", e.to_string()))),
+        };
+
         let mut buf1 = Vec::new();
         doc.version = 1;
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
-        let _lock = self.latch.latch_lock(doc.slot);
-        self.raft_write(Event::Put(key, buf1), callback)
+
+        match iid {
+            Some(iid) => self.raft_write(Event::Update(iid, key, buf1), callback),
+            None => self.raft_write(Event::Create(key, buf1), callback),
+        }
     }
 
     fn raft_write(&self, event: Event, callback: WriteRaftCallback) -> ASResult<()> {
@@ -270,47 +298,47 @@ impl Simba {
     }
 
     pub fn do_write(&self, raft_index: u64, data: &Vec<u8>) -> ASResult<()> {
-        match EventCodec::decode(data)? {
-            Event::Put(key, value) => {
-                let general_id = self.max_iid.fetch_add(1, SeqCst);
-                let iid = iid_coding(general_id);
-                let mut batch = WriteBatch::default();
-                batch.put(key, &iid)?;
-                if self.base.collection.fields.len() == 0 {
-                    batch.put(iid, value)?;
-                    return self.rocksdb.write_batch(batch);
-                }
-
-                let mut pbdoc: Document =
-                    Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
-                let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
-                if self.base.collection.vector_field_index.len() > 0 {
-                    let map = source.as_object_mut().unwrap();
-                    for i in self.base.collection.vector_field_index.iter() {
-                        let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
-                        if let Some(v) = map.remove(field_name) {
-                            let index = self.faiss.get_field(field_name)?;
-                            let vector: Vec<f32> = serde_json::from_value(v)?;
-                            if index.befor_add(&vector)? {
-                                Faiss::start_job(self.rocksdb.clone(), index.clone());
-                            }
-                            batch
-                                .put(field_coding(field_name, general_id), slice_slice(&vector))?;
-                        };
-                    }
-                    pbdoc.source = serde_json::to_vec(&source)?;
-                    let mut buf1 = Vec::new();
-                    if let Err(error) = pbdoc.encode(&mut buf1) {
-                        return Err(error.into());
-                    }
-                    batch.put(iid, &buf1)?;
-                } else {
-                    batch.put(iid, value)?;
-                }
-                self.rocksdb.write_batch(batch)?;
+        let (event, old_iid, key, value) = EventCodec::decode(data);
+        if event == EventType::Delete {
+            self.rocksdb.delete(key)?;
+            self.del_map.write().unwrap().insert(old_iid as u32);
+        } else {
+            let general_id = self.max_iid.fetch_add(1, SeqCst);
+            let iid = iid_coding(general_id);
+            let mut batch = WriteBatch::default();
+            batch.put(key, &iid)?;
+            if self.base.collection.fields.len() == 0 {
+                batch.put(iid, value)?;
+                return self.rocksdb.write_batch(batch);
             }
-            Event::Delete(key) => {
-                return self.rocksdb.delete(&key); //TODO other delete
+
+            let mut pbdoc: Document = Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
+            let mut source: Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+            if self.base.collection.vector_field_index.len() > 0 {
+                let map = source.as_object_mut().unwrap();
+                for i in self.base.collection.vector_field_index.iter() {
+                    let field_name = self.base.collection.fields[*i].name.as_ref().unwrap();
+                    if let Some(v) = map.remove(field_name) {
+                        let index = self.faiss.get_field(field_name)?;
+                        let vector: Vec<f32> = serde_json::from_value(v)?;
+                        if index.befor_add(&vector)? {
+                            Faiss::start_job(self.rocksdb.clone(), index.clone());
+                        }
+                        batch.put(field_coding(field_name, general_id), slice_slice(&vector))?;
+                    };
+                }
+                pbdoc.source = serde_json::to_vec(&source)?;
+                let mut buf1 = Vec::new();
+                if let Err(error) = pbdoc.encode(&mut buf1) {
+                    return Err(error.into());
+                }
+                batch.put(iid, &buf1)?;
+            } else {
+                batch.put(iid, value)?;
+            }
+            self.rocksdb.write_batch(batch)?;
+            if old_iid > 0 {
+                self.del_map.write().unwrap().insert(old_iid as u32);
             }
         }
 

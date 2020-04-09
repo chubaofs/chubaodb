@@ -321,7 +321,10 @@ impl MasterService {
         {
             Ok(v) => match String::from_utf8(v) {
                 Ok(v) => Ok(v),
-                Err(e) => Err(err_box(String::from("Invalid server addr UTF-8 sequence "))),
+                Err(e) => Err(err_box(format!(
+                    "Invalid server addr UTF-8 sequence:{:?}",
+                    e
+                ))),
             },
             Err(e) => Err(e),
         }

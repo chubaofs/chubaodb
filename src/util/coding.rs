@@ -24,9 +24,9 @@ pub fn hash_str(v: &str) -> u64 {
 }
 
 pub fn slice_u16(pack_data: &[u8]) -> u16 {
-	let mut v: [u8; 4] = Default::default();
+	let mut v: [u8; 2] = Default::default();
 	v.copy_from_slice(pack_data);
-	fix_size_u16(v)
+	fix_slice_u16(v)
 }
 
 //it is not

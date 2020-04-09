@@ -4,21 +4,19 @@ use crate::pserver::raft::state_machine::*;
 use crate::util::entity::Partition;
 use crate::util::{coding::*, config, entity::*, error::*};
 use jimraft::{
-    error::RResult, raft::LogReader, CmdResult, ConfigChange, NodeResolver, NodeResolverCallback,
-    Peer, PeerType, Raft, RaftOptions, RaftServer, RaftServerOptions, Snapshot, StateMachine,
-    StateMachineCallback,
+    error::RResult, raft::LogReader, NodeResolver, NodeResolverCallback, Peer, PeerType, Raft,
+    RaftOptions, RaftServer, RaftServerOptions, StateMachineCallback,
 };
 use std::boxed::Box;
 use std::collections::HashMap;
 use std::mem;
-use std::ops::Deref;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 use tokio::runtime::Builder;
 
 pub struct JimRaftServer {
-    conf: Arc<config::Config>,
+    _conf: Arc<config::Config>,
     pub node_id: u64,
     raft_server: RaftServer,
 }
@@ -49,7 +47,7 @@ impl JimRaftServer {
         server_ops.set_election_tick(conf.ps.rs.election_tick);
         server_ops.set_transport_inprocess_use(conf.ps.rs.transport_inprocess_use);
         Self {
-            conf: conf,
+            _conf: conf,
             node_id: node_id,
             raft_server: RaftServer::new(server_ops),
         }
@@ -86,11 +84,12 @@ impl JimRaftServer {
             if replica.node == self.node_id as u32 {
                 current_peer_id = replica.peer;
             }
-            let mut peer_type;
-            match replica.replica_type {
-                ReplicaType::LEARNER => peer_type = PeerType::LEARNER,
-                ReplicaType::NORMAL => peer_type = PeerType::NORMAL,
-            }
+
+            let peer_type = match replica.replica_type {
+                ReplicaType::LEARNER => PeerType::LEARNER,
+                ReplicaType::NORMAL => PeerType::NORMAL,
+            };
+
             let peer: Peer = Peer {
                 type_: peer_type,
                 node_id: replica.node as u64,
