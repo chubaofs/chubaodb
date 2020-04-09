@@ -158,7 +158,7 @@ impl Simba {
         let (doc, write_type) = (req.doc.unwrap(), WriteType::from_i32(req.write_type));
 
         match write_type {
-            Some(WriteType::Overwrite) => self._put(doc, callback),
+            Some(WriteType::Put) => self._put(doc, callback),
             Some(WriteType::Create) => self._create(doc, callback),
             Some(WriteType::Update) => self._update(doc, callback),
             Some(WriteType::Upsert) => self._upsert(doc, callback),

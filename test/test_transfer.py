@@ -87,9 +87,9 @@ def test_transfer():
     assert response.status_code == 200
 
 
-def test_overwrite():
+def test_put():
     id = random.randint(1, 100000000)
-    response = requests.post("http://" + ROUTER + "/overwrite/t1/"+str(id), data=json.dumps({
+    response = requests.post("http://" + ROUTER + "/put/t1/"+str(id), data=json.dumps({
         "name": "ansj",
         "age": 35,
         "content": "hello tig"
@@ -103,4 +103,4 @@ def test_overwrite():
 def test_multiple():
     for i in range(10):
         test_transfer()
-        test_overwrite()
+        test_put()

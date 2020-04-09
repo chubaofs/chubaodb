@@ -39,10 +39,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
             .data(arc_service.clone())
             .route("/", web::get().to(domain))
             .route("/get/{collection_name}/{id}", web::get().to(get))
-            .route(
-                "/overwrite/{collection_name}/{id}",
-                web::post().to(overwrite),
-            )
+            .route("/put/{collection_name}/{id}", web::post().to(put))
             .route("/update/{collection_name}/{id}", web::post().to(update))
             .route("/upsert/{collection_name}/{id}", web::post().to(upsert))
             .route("/create/{collection_name}/{id}", web::post().to(create))
@@ -147,7 +144,7 @@ async fn create(
     .await
 }
 
-async fn overwrite(
+async fn put(
     rs: web::Data<Arc<RouterService>>,
     req: HttpRequest,
     query: web::Query<DocumentQuery>,
@@ -158,7 +155,7 @@ async fn overwrite(
         req,
         Some(bytes),
         query.into_inner(),
-        WriteType::Overwrite as i32,
+        WriteType::Put as i32,
     )
     .await
 }

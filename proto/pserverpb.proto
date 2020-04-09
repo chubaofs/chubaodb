@@ -93,7 +93,7 @@
  
  enum WriteType {
    unknow = 0;
-   overwrite = 1;
+   put = 1;
    create = 2;
    update = 3;
    upsert = 4;

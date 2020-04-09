@@ -42,7 +42,7 @@ def post():
         try:
             stime = time.time()
             id = random.randint(1, 1000)
-            response = requests.post("http://" + ROUTER + "/overwrite/t1/"+str(id), data=json.dumps({
+            response = requests.post("http://" + ROUTER + "/put/t1/"+str(id), data=json.dumps({
                 "name": "ansj",
                 "age": 35,
                 "content": "hello tig"
