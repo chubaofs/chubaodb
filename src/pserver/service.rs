@@ -126,7 +126,7 @@ impl PartitionService {
             }
         }
 
-        info!("get_server line:{:?}", ps);
+        info!("register server line:{:?}", ps);
 
         for wp in ps.write_partitions {
             if let Err(e) = self
@@ -192,7 +192,8 @@ impl PartitionService {
         let raft_server =
             JimRaftServer::get_instance(self.conf.clone(), self.server_id.load(SeqCst));
 
-        let raft = raft_server.create_raft(partition.clone(), self.sender.clone())?;
+        let raft =
+            raft_server.create_raft(self.conf.clone(), partition.clone(), self.sender.clone())?;
 
         self.simba_map.write().unwrap().insert(
             (collection_id, partition_id),

@@ -211,6 +211,7 @@ impl MasterService {
         info!("prepare add collection info:{}", partitions.len());
 
         self.meta_service.create(&collection)?;
+        self.meta_service.put_batch(&partitions)?;
 
         for c in partitions {
             let mut replicas: Vec<ReplicaInfo> = vec![];

@@ -55,6 +55,7 @@ impl JimRaftServer {
 
     pub fn create_raft(
         &self,
+        conf: Arc<config::Config>,
         partition: Arc<Partition>,
         sender: Arc<Mutex<Sender<MemberChange>>>,
     ) -> ASResult<Raft> {
@@ -73,7 +74,10 @@ impl JimRaftServer {
         options.set_id(merge_u32(cid, pid));
         options.set_peers(peers);
         options.set_state_machine(callback);
-        options.set_use_memoray_storage(true);
+        options.set_use_memoray_storage(false);
+        let base: String = conf.ps.clone().raft.clone().storage_path.unwrap();
+        let path = base + "/" + cid.to_string().as_str() + "/" + pid.to_string().as_str();
+        options.set_storage_path(path.as_str());
         convert(self.raft_server.create_raft(&options))
     }
 

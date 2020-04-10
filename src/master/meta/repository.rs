@@ -162,6 +162,15 @@ impl HARepository {
         self.do_put_json(key.as_str(), value)
     }
 
+    pub fn put_batch<T: Serialize + MakeKey>(&self, values: &Vec<T>) -> ASResult<()> {
+        let _lock = self.write_lock.read().unwrap();
+        let mut kvs: Vec<(String, &T)> = vec![];
+        for value in values {
+            kvs.push((value.make_key(), value));
+        }
+        self.do_put_jsons(kvs)
+    }
+
     pub fn put_kv(&self, key: &str, value: &[u8]) -> ASResult<()> {
         let _lock = self.write_lock.read().unwrap();
         self.do_put(key, value)
@@ -199,6 +208,20 @@ impl HARepository {
             Ok(v) => self.do_put(key, v.as_slice()),
             Err(e) => Err(err_box(format!("cast to json bytes err:{}", e.to_string()))),
         }
+    }
+
+    /// do put json
+    fn do_put_jsons<T: Serialize>(&self, kvs: Vec<(String, &T)>) -> ASResult<()> {
+        let mut batch = WriteBatch::default();
+
+        for kv in kvs {
+            match serde_json::to_vec(kv.1) {
+                Ok(v) => convert(batch.put(kv.0.as_bytes(), v.as_slice()))?,
+                Err(e) => return Err(err_box(format!("cast to json bytes err:{}", e.to_string()))),
+            }
+        }
+
+        self.do_write_batch(batch)
     }
 
     //do put with bytes

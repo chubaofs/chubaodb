@@ -208,7 +208,7 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
             ps: PS {
                 id: None,
                 zone_id: 0,
-                data: String::from("data/"),
+                data: String::from("data/ps"),
                 rpc_port: 9090,
                 flush_sleep_sec: Some(3),
                 raft: RaftOps {
