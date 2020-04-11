@@ -28,7 +28,7 @@ use crate::util::{
     error::*,
     time::current_millis,
 };
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use prost::Message;
 use roaring::RoaringBitmap;
 use rocksdb::WriteBatch;
@@ -355,17 +355,28 @@ impl Simba {
     fn flush(&self) -> ASResult<()> {
         let flush_time = self.base.conf.ps.flush_sleep_sec.unwrap_or(60) * 1000;
 
+        let mut pre_index = 0;
+
         while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
 
             let begin = current_millis();
 
-            if let Err(e) = self.rocksdb.write_raft_index(self.raft_index.load(SeqCst)) {
+            let index = self.raft_index.load(SeqCst);
+
+            if pre_index == index {
+                debug!("the raft index is same:{} so skip flush", index);
+                continue;
+            }
+
+            if let Err(e) = self.rocksdb.write_raft_index(pre_index) {
                 error!("write has err :{:?}", e);
             };
             if let Err(e) = self.rocksdb.flush() {
                 error!("rocksdb flush has err:{:?}", e);
             }
+
+            pre_index = index;
 
             info!("flush job ok use time:{}ms", current_millis() - begin);
         }
