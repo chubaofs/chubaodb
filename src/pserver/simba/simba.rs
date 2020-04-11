@@ -275,20 +275,19 @@ impl Simba {
 
     fn _put(&self, mut doc: Document, callback: WriteRaftCallback) -> ASResult<()> {
         let key = doc_key(&doc);
-        let _lock = self.latch.latch_lock(doc.slot);
-        let iid = match self.rocksdb.db.get(&key) {
-            Ok(iid) => iid,
-            Err(e) => return Err(err_box(format!("get key has err:{}", e.to_string()))),
-        };
-
         let mut buf1 = Vec::new();
         doc.version = 1;
         if let Err(error) = doc.encode(&mut buf1) {
             return Err(error.into());
         }
+        let _lock = self.latch.latch_lock(doc.slot);
+        let iid = match self.rocksdb.db.get(&key) {
+            Ok(iid) => iid,
+            Err(_) => None,
+        };
 
         match iid {
-            Some(iid) => self.raft_write(Event::Update(iid, key, buf1), callback),
+            Some(id) => self.raft_write(Event::Update(id, key, buf1), callback),
             None => self.raft_write(Event::Create(key, buf1), callback),
         }
     }
@@ -354,38 +353,18 @@ impl Simba {
 
 impl Simba {
     fn flush(&self) -> ASResult<()> {
-        let flush_time = self.base.conf.ps.flush_sleep_sec.unwrap_or(3) * 1000;
-
-        let (rocksdb_flush_ratio, faiss_flush_ratio, tantivy_flush_ratio) = (10, 100, 1);
-
-        let mut num = 0;
+        let flush_time = self.base.conf.ps.flush_sleep_sec.unwrap_or(60) * 1000;
 
         while !self.base.stoped.load(SeqCst) {
             sleep!(flush_time);
 
-            num += 1;
-
             let begin = current_millis();
 
-            if num % rocksdb_flush_ratio == 0 {
-                if let Err(e) = self.rocksdb.write_raft_index(self.raft_index.load(SeqCst)) {
-                    error!("write has err :{:?}", e);
-                };
-                if let Err(e) = self.rocksdb.flush() {
-                    error!("rocksdb flush has err:{:?}", e);
-                }
-            }
-
-            if num % tantivy_flush_ratio == 0 {
-                if let Err(e) = self.tantivy.flush() {
-                    error!("rocksdb flush has err:{:?}", e);
-                }
-            }
-
-            if num % faiss_flush_ratio == 0 {
-                if let Err(e) = self.faiss.flush() {
-                    error!("rocksdb flush has err:{:?}", e);
-                }
+            if let Err(e) = self.rocksdb.write_raft_index(self.raft_index.load(SeqCst)) {
+                error!("write has err :{:?}", e);
+            };
+            if let Err(e) = self.rocksdb.flush() {
+                error!("rocksdb flush has err:{:?}", e);
             }
 
             info!("flush job ok use time:{}ms", current_millis() - begin);

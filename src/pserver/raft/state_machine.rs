@@ -106,20 +106,29 @@ impl EventCodec {
     pub fn encode(event: Event) -> Vec<u8> {
         match event {
             Event::Delete(iid, mut k) => {
-                k.reserve(k.len() + iid.len() + 1 - k.capacity());
+                let need_len = k.len() + iid.len() + 1;
+                if k.capacity() < need_len {
+                    k.reserve(need_len - k.capacity());
+                }
                 k.extend_from_slice(&iid);
                 k.push(EventType::Delete as u8);
                 k
             }
             Event::Create(k, mut v) => {
-                v.reserve(v.len() + k.len() + 3 - v.capacity());
+                let need_len = v.len() + k.len() + 3;
+                if v.capacity() < need_len {
+                    v.reserve(need_len - v.capacity());
+                }
                 v.extend_from_slice(&k);
                 v.extend_from_slice(&u16_slice(k.len() as u16)[..]);
                 v.push(EventType::Create as u8);
                 v
             }
             Event::Update(iid, k, mut v) => {
-                v.reserve(v.len() + k.len() + 11 - v.capacity());
+                let need_len = v.len() + k.len() + 11;
+                if v.capacity() < need_len {
+                    v.reserve(need_len - v.capacity());
+                }
                 v.extend_from_slice(&k);
                 v.extend_from_slice(&u16_slice(k.len() as u16)[..]);
                 v.extend_from_slice(&iid);
@@ -148,8 +157,8 @@ impl EventCodec {
                 (
                     EventType::Create,
                     0,
-                    &data[len - key_len..len],
-                    &data[..len - key_len],
+                    &data[len - 2 - key_len..len - 2],
+                    &data[..len - 2 - key_len],
                 )
             }
             2 => {
