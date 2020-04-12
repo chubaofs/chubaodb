@@ -112,7 +112,7 @@ pub fn base64(value: &Vec<u8>) -> String {
  *
  */
 
-pub const RAFT_INDEX_KEY: &'static [u8; 1] = &[1];
+pub const RAFT_INDEX_KEY: &'static [u8; 2] = &[1, 1];
 
 pub fn iid_coding(iid: i64) -> [u8; 8] {
 	i64_slice(iid)

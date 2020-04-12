@@ -99,6 +99,7 @@ impl RocksDB {
             .iterator(IteratorMode::From(&vec![1], Direction::Reverse)); // From a key in Direction::{forward,reverse}
 
         for (k, _) in iter {
+            println!("========================================{:?}", k);
             return slice_i64(&k);
         }
 
