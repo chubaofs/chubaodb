@@ -214,14 +214,3 @@ impl AppendCallback for WriteRaftCallback {
         }
     }
 }
-
-#[test]
-fn test_EventCodec() {
-    use crate::util::coding::i64_slice;
-    let key = &String::from("test_key")[..];
-    let value = &String::from("test_value")[..];
-    let iid = i64_slice(123)[..];
-    let event = Event::Create(key, value);
-    let value = EventCodec::encode(event);
-    println!("{:?}", value);
-}

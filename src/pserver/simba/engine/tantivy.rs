@@ -17,6 +17,7 @@ use crate::pserverpb::*;
 use crate::util::coding::iid_coding;
 use crate::util::error::*;
 use log::{debug, error, info, warn};
+use roaring::RoaringBitmap;
 use std::fs;
 use std::ops::Deref;
 use std::path::Path;
@@ -162,6 +163,32 @@ impl Tantivy {
             sum += sr.num_docs() as u64;
         }
         Ok(sum)
+    }
+
+    pub fn filter(&self, sdr: Arc<SearchDocumentRequest>) -> ASResult<RoaringBitmap> {
+        self.check_index()?;
+        let searcher = self.index_reader.searcher();
+        let query_parser = QueryParser::for_index(
+            &self.index,
+            sdr.def_fields
+                .iter()
+                .map(|s| self.index.schema().get_field(s).unwrap())
+                .collect(),
+        );
+        let size = sdr.size as usize;
+        let q = convert(query_parser.parse_query(sdr.query.as_str()))?;
+
+        let mut collectors = MultiCollector::new();
+        let top_docs_handle = collectors.add_collector(TopDocs::with_limit(size));
+        let count_handle = collectors.add_collector(Count);
+
+        let search_start = SystemTime::now();
+        let mut multi_fruit = convert(searcher.search(&q, &collectors))?;
+
+        let count = count_handle.extract(&mut multi_fruit);
+        let top_docs = top_docs_handle.extract(&mut multi_fruit);
+
+        panic!("impl me")
     }
 
     pub fn search(&self, sdr: Arc<SearchDocumentRequest>) -> ASResult<SearchDocumentResponse> {
