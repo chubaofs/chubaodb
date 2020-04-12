@@ -205,7 +205,7 @@ impl AppendCallback for WriteRaftCallback {
             return;
         };
 
-        if let Err(e) = self.simba.do_write(cmd.index, &cmd.data) {
+        if let Err(e) = self.simba.do_write(cmd.index, &cmd.data, false) {
             self.send_result(err(e.to_string()));
         } else {
             return self.send_result(GenericError(SUCCESS, String::default()));

@@ -12,30 +12,42 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::pserver::simba::engine::engine::{BaseEngine, Engine};
+use crate::pserver::simba::engine::rocksdb::RocksDB;
 use crate::pserverpb::*;
+use crate::util::coding::iid_coding;
 use crate::util::error::*;
 use log::{debug, error, info, warn};
 use std::fs;
 use std::ops::Deref;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Arc, Mutex, RwLock,
+};
 use std::time::SystemTime;
 use tantivy::{
     collector::{Count, MultiCollector, TopDocs},
     directory::MmapDirectory,
-    query::QueryParser,
+    query::{QueryParser, TermQuery},
     schema,
-    schema::{Field, FieldEntry, FieldType as TantivyFT, FieldValue, Schema, Value},
+    schema::{Field, FieldType as TantivyFT, FieldValue, IndexRecordOption, Schema, Value},
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Term,
 };
 
 const INDEXER_MEMORY_SIZE: usize = 1_000_000_000;
 const INDEXER_THREAD: usize = 1;
 const ID: &'static str = "_id";
+const ID_BYTES: &'static str = "_id_bytes";
 const ID_INDEX: u32 = 0;
-const SOURCE: &'static str = "_source";
-const SOURCE_INDEX: u32 = 1;
+const ID_BYTES_INDEX: u32 = 1;
 const INDEX_DIR_NAME: &'static str = "index";
+
+pub enum Event {
+    Delete(i64),
+    // Update(old_iid , new_iid)
+    Update(i64, i64),
+    Stop,
+}
 
 pub struct Tantivy {
     base: Arc<BaseEngine>,
@@ -43,6 +55,8 @@ pub struct Tantivy {
     index_writer: RwLock<IndexWriter>,
     index_reader: IndexReader,
     field_num: usize,
+    db: Arc<RocksDB>,
+    tx: Mutex<Sender<Event>>,
 }
 
 impl Deref for Tantivy {
@@ -53,12 +67,12 @@ impl Deref for Tantivy {
 }
 
 impl Tantivy {
-    pub fn new(base: Arc<BaseEngine>) -> ASResult<Tantivy> {
+    pub fn new(db: Arc<RocksDB>, base: Arc<BaseEngine>) -> ASResult<Arc<Tantivy>> {
         let now = SystemTime::now();
 
         let mut schema_builder = Schema::builder();
         schema_builder.add_text_field(ID, schema::STRING.set_stored());
-        schema_builder.add_bytes_field(SOURCE);
+        schema_builder.add_bytes_field(ID_BYTES);
 
         for field in base.collection.fields.iter() {
             match field.internal_type {
@@ -113,13 +127,19 @@ impl Tantivy {
             .try_into()
             .unwrap();
 
-        let tantivy = Tantivy {
+        let (tx, rx) = channel::<Event>();
+
+        let tantivy = Arc::new(Tantivy {
             base: base,
             index: index,
             index_writer: RwLock::new(index_writer),
             index_reader: index_reader,
             field_num: field_num,
-        };
+            db: db,
+            tx: Mutex::new(tx),
+        });
+
+        Tantivy::start_job(tantivy.clone(), rx);
 
         info!(
             "init index by collection:{} partition:{} success , use time:{:?} ",
@@ -177,7 +197,7 @@ impl Tantivy {
             let bytes_reader = searcher
                 .segment_reader(doc_address.0)
                 .fast_fields()
-                .bytes(Field::from_field_id(SOURCE_INDEX))
+                .bytes(Field::from_field_id(ID_BYTES_INDEX))
                 .unwrap();
 
             let doc = bytes_reader.get_bytes(doc_address.1);
@@ -199,51 +219,130 @@ impl Tantivy {
         Ok(sdr)
     }
 
-    pub fn write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
-        let iid = base64::encode(key);
+    pub fn exist(&self, iid: i64) -> ASResult<bool> {
+        let searcher = self.index_reader.searcher();
+        let query = TermQuery::new(
+            Term::from_field_i64(Field::from_field_id(ID_INDEX), iid),
+            IndexRecordOption::Basic,
+        );
+        let td = TopDocs::with_limit(1);
+        let result = convert(searcher.search(&query, &td))?;
+        return Ok(result.len() > 0);
+    }
 
-        let pbdoc: crate::pserverpb::Document =
-            prost::Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
+    pub fn start_job(index: Arc<Tantivy>, receiver: Receiver<Event>) {
+        std::thread::spawn(move || {
+            let (cid, pid) = (index.base.collection.id.unwrap(), index.base.partition.id);
+            Tantivy::index_job(index, receiver);
+            warn!("collection:{}  partition:{} stop index job ", cid, pid);
+        });
+    }
 
-        let source: serde_json::Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+    pub fn index_job(index: Arc<Tantivy>, rx: Receiver<Event>) {
+        loop {
+            let e = rx.recv_timeout(std::time::Duration::from_secs(3));
 
-        let mut doc = Document::default();
-        doc.add_text(Field::from_field_id(ID_INDEX), iid.as_str());
-        doc.add_bytes(Field::from_field_id(SOURCE_INDEX), value.clone());
-        let schema = self.index.schema();
-        for (k, v) in source.as_object().unwrap() {
-            if let Some(f) = schema.get_field(k) {
-                let entry: &FieldEntry = schema.get_field_entry(f);
+            if e.is_err() {
+                if index.base.runing() {
+                    continue;
+                } else {
+                    return;
+                }
+            }
 
-                let v = match entry.field_type() {
-                    &TantivyFT::Str(_) => Value::Str(v.as_str().unwrap().to_string()),
-                    &TantivyFT::I64(_) => Value::I64(v.as_i64().unwrap()),
-                    &TantivyFT::F64(_) => Value::F64(v.as_f64().unwrap()),
-                    _ => {
-                        return Err(err_code_box(
-                            FIELD_TYPE_ERR,
-                            format!("not support this type :{:?}", entry.field_type()),
-                        ))
-                    }
-                };
-                doc.add(FieldValue::new(f, v));
+            let (old_iid, iid) = match e.unwrap() {
+                Event::Delete(iid) => (iid, 0),
+                Event::Update(old_iid, iid) => (old_iid, iid),
+                Event::Stop => return,
             };
-        }
 
-        self.index_writer
+            if iid == 0 {
+                if old_iid > 0 {
+                    if let Err(e) = index._delete(old_iid) {
+                        error!("delete:{}  has err:{:?}", old_iid, e);
+                    }
+                }
+            } else if iid > 0 {
+                match index.db.db.get(iid_coding(iid)) {
+                    Ok(v) => {
+                        if let Some(v) = v {
+                            if let Err(e) = index._create(old_iid, iid, v) {
+                                error!("index values has err:{:?}", e);
+                            }
+                        } else {
+                            error!("index get doc by db not found");
+                        }
+                    }
+                    Err(e) => {
+                        error!("index get doc by db has err:{:?}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn write(&self, event: Event) -> ASResult<()> {
+        convert(self.tx.lock().unwrap().send(event))
+    }
+
+    fn _delete(&self, iid: i64) -> ASResult<()> {
+        self.check_index()?;
+        let ops = self
+            .index_writer
             .read()
             .unwrap()
-            .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
-        self.index_writer.read().unwrap().add_document(doc);
+            .delete_term(Term::from_field_i64(Field::from_field_id(0), iid));
+
+        debug!("delete id:{} result:{:?}", iid, ops);
         Ok(())
     }
 
-    pub fn delete(&self, key: &Vec<u8>) -> ASResult<()> {
-        let iid = base64::encode(key);
-        self.index_writer
-            .read()
-            .unwrap()
-            .delete_term(Term::from_field_text(Field::from_field_id(0), iid.as_str()));
+    fn _create(&self, old_iid: i64, iid: i64, value: Vec<u8>) -> ASResult<()> {
+        self.check_index()?;
+        let pbdoc: crate::pserverpb::Document =
+            prost::Message::decode(prost::bytes::Bytes::from(value))?;
+
+        let mut doc = Document::default();
+
+        doc.add_i64(Field::from_field_id(ID_INDEX), iid);
+        doc.add_bytes(
+            Field::from_field_id(ID_BYTES_INDEX),
+            iid_coding(iid).to_vec(),
+        );
+
+        let source: serde_json::Value = serde_json::from_slice(pbdoc.source.as_slice())?;
+
+        let mut flag: bool = false;
+
+        for (f, fe) in self.index.schema().fields() {
+            let v = &source[fe.name()];
+            if v.is_null() {
+                continue;
+            }
+
+            let v = match fe.field_type() {
+                &TantivyFT::Str(_) => Value::Str(v.as_str().unwrap().to_string()),
+                &TantivyFT::I64(_) => Value::I64(v.as_i64().unwrap()),
+                &TantivyFT::F64(_) => Value::F64(v.as_f64().unwrap()),
+                _ => {
+                    return Err(err_code_box(
+                        FIELD_TYPE_ERR,
+                        format!("not support this type :{:?}", fe.field_type()),
+                    ))
+                }
+            };
+            doc.add(FieldValue::new(f, v));
+            flag = true;
+        }
+
+        let writer = self.index_writer.write().unwrap();
+        if old_iid > 0 {
+            writer.delete_term(Term::from_field_i64(Field::from_field_id(0), iid));
+        }
+        if flag {
+            writer.add_document(doc);
+        }
+
         Ok(())
     }
 

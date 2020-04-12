@@ -16,6 +16,7 @@ use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
     faiss::Faiss,
     rocksdb::RocksDB,
+    tantivy::Event as TantivyEvent,
     tantivy::Tantivy,
 };
 use crate::pserver::simba::latch::Latch;
@@ -45,7 +46,7 @@ pub struct Simba {
     del_map: RwLock<RoaringBitmap>,
     //engins
     rocksdb: Arc<RocksDB>,
-    tantivy: Tantivy,
+    tantivy: Arc<Tantivy>,
     faiss: Faiss,
     raft: Option<Arc<RaftEngine>>,
 }
@@ -64,8 +65,8 @@ impl Simba {
             stoped: AtomicBool::new(false),
         });
 
-        let rocksdb = RocksDB::new(base.clone())?;
-        let tantivy = Tantivy::new(base.clone())?;
+        let rocksdb = Arc::new(RocksDB::new(base.clone())?);
+        let tantivy = Tantivy::new(rocksdb.clone(), base.clone())?;
         let faiss = Faiss::new(base.clone())?;
 
         let raft_index = rocksdb.read_raft_index()?;
@@ -77,7 +78,7 @@ impl Simba {
             raft_index: AtomicU64::new(raft_index),
             max_iid: AtomicI64::new(max_iid),
             del_map: RwLock::new(RoaringBitmap::new()),
-            rocksdb: Arc::new(rocksdb),
+            rocksdb: rocksdb,
             tantivy: tantivy,
             faiss: faiss,
         });
@@ -296,10 +297,11 @@ impl Simba {
         self.raft.as_ref().unwrap().append(event, callback)
     }
 
-    pub fn do_write(&self, raft_index: u64, data: &Vec<u8>) -> ASResult<()> {
+    pub fn do_write(&self, raft_index: u64, data: &Vec<u8>, check: bool) -> ASResult<()> {
         let (event, old_iid, key, value) = EventCodec::decode(data);
         if event == EventType::Delete {
             self.rocksdb.delete(key)?;
+            self.tantivy.write(TantivyEvent::Delete(old_iid))?;
             self.del_map.write().unwrap().insert(old_iid as u32);
         } else {
             let general_id = self.max_iid.fetch_add(1, SeqCst);
@@ -335,7 +337,11 @@ impl Simba {
             } else {
                 batch.put(iid, value)?;
             }
-            self.rocksdb.write_batch(batch)?;
+
+            if !check || !self.tantivy.exist(general_id)? {
+                self.rocksdb.write_batch(batch)?;
+            }
+
             if old_iid > 0 {
                 self.del_map.write().unwrap().insert(old_iid as u32);
             }
