@@ -35,7 +35,8 @@ uuid = { version = "0.8", features = ["v4"] }
 rocksdb = { version = "0.13", features = ["lz4"] }
 tantivy = "0.12.0"
 faiss4rs = { git = "https://github.com/ansjsun/rust-faiss" }
-jimraft = { path = "../rust-jimraft", version = "0.1.0" }
+jimraft = { path = "../../github/rust-jimraft", version = "0.1.0" }
+#jimraft = { git = "https://github.com/jimdb-org/rust-jimraft" }
 libc = "0.2.9"
 rand = "0.7.3"
 roaring = "0.6.0"
