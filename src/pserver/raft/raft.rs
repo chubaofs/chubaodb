@@ -78,6 +78,7 @@ impl JimRaftServer {
         let base: String = conf.ps.clone().raft.clone().storage_path.unwrap();
         let path = base + "/" + cid.to_string().as_str() + "/" + pid.to_string().as_str();
         options.set_storage_path(path.as_str());
+
         convert(self.raft_server.create_raft(&options))
     }
 

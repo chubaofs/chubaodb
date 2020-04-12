@@ -188,11 +188,9 @@ impl PartitionService {
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port), //TODO: first need set leader.
             version: version + 1,
         });
-
         //first group raft
         let raft_server =
             JimRaftServer::get_instance(self.conf.clone(), self.server_id.load(SeqCst));
-
         let raft =
             raft_server.create_raft(self.conf.clone(), partition.clone(), self.sender.clone())?;
 
@@ -247,26 +245,31 @@ impl PartitionService {
                 raft.partition.clone(),
             )?;
 
-            // let reader = raft.raft.begin_read_log(simba.get_raft_index())?;
+            let reader = raft.raft.begin_read_log(simba.get_raft_index())?;
 
-            // loop {
-            //     match reader.next_log() {
-            //         Ok((_, raft_index, line, flag)) => {
-            //             if !flag {
-            //                 break;
-            //             }
-            //             if let Err(e) = simba.do_write(raft_index, &line) {
-            //                 error!("init raft log has err:{:?} line:{:?}", e, line);
-            //             }
-            //         }
-            //         Err(e) => {
-            //             error!(
-            //                 "collection:{} partition:{} got log from raft has err:{:?}",
-            //                 cid, pid, e
-            //             );
-            //         }
-            //     }
-            // }
+            loop {
+                match reader.next_log() {
+                    Ok((_, raft_index, line, flag)) => {
+                        if flag {
+                            break;
+                        }
+
+                        if line.len() == 0 {
+                            continue;
+                        }
+
+                        if let Err(e) = simba.do_write(raft_index, &line, true) {
+                            error!("init raft log has err:{:?} line:{:?}", e, line);
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "collection:{} partition:{} got log from raft has err:{:?}",
+                            cid, pid, e
+                        );
+                    }
+                }
+            }
 
             let store = Store::Leader(store.raft()?, simba);
             self.simba_map
