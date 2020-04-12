@@ -138,7 +138,7 @@ impl PartitionService {
             };
         }
 
-        self.take_heartbeat().await?;
+        // self.take_heartbeat().await?;
 
         Ok(())
     }

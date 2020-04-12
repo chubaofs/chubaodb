@@ -17,13 +17,15 @@ pub struct SimpleStateMachine {
     pub partition_id: u32,
     pub sender: Arc<Mutex<Sender<MemberChange>>>,
 }
-
+use libc::{self, c_void};
 impl StateMachine for SimpleStateMachine {
     fn apply(&mut self, result: &CmdResult) -> RResult<()> {
         self.persisted = result.index;
         unsafe {
-            let cb = &mut *(result.tag as *mut AppendCallbackFaced);
-            cb.call(result);
+            if result.tag != 0 as *mut c_void {
+                let cb = &mut *(result.tag as *mut AppendCallbackFaced);
+                cb.call(result);
+            }
         }
         Ok(())
     }
