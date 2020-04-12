@@ -29,6 +29,7 @@ use std::sync::{
     Arc, Mutex, RwLock,
 };
 use std::thread;
+use tokio::runtime::Builder;
 
 enum Store {
     Leader(Arc<RaftEngine>, Arc<Simba>),
@@ -232,7 +233,6 @@ impl PartitionService {
                 )));
             }
         };
-
         if self.server_id.load(SeqCst) == leader_id {
             if store.is_leader_type() {
                 return Ok(());
@@ -284,6 +284,12 @@ impl PartitionService {
                 .insert((cid, pid), Arc::new(store));
         }
 
+        let mut rt = Builder::new()
+            .basic_scheduler()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = rt.block_on(self.take_heartbeat());
         return Ok(());
     }
 
