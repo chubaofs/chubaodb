@@ -188,11 +188,9 @@ impl PartitionService {
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port), //TODO: first need set leader.
             version: version + 1,
         });
-
         //first group raft
         let raft_server =
             JimRaftServer::get_instance(self.conf.clone(), self.server_id.load(SeqCst));
-
         let raft =
             raft_server.create_raft(self.conf.clone(), partition.clone(), self.sender.clone())?;
 
@@ -255,10 +253,6 @@ impl PartitionService {
                         if flag {
                             break;
                         }
-                        println!(
-                            "=============================got raft_index:{} log {:?}",
-                            raft_index, line
-                        );
 
                         if line.len() == 0 {
                             continue;

@@ -316,10 +316,6 @@ impl MasterService {
     }
 
     pub fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
-        for s in self.list_servers()? {
-            println!("======================{:?}", s);
-        }
-
         match self
             .meta_service
             .get_kv(entity_key::pserver_id(server_id).as_str())
