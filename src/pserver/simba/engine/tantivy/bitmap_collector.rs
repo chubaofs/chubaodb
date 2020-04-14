@@ -1,52 +1,60 @@
 use crate::pserver::simba::engine::tantivy::ID_BYTES_INDEX;
+use crate::util::coding::slice_i64;
 use roaring::RoaringBitmap;
-use std::sync::Mutex;
 use tantivy::{
-    collector::SegmentCollector, schema::Field, BytesFastFieldReader, Collector, DocId, Score,
-    SegmentLocalId, SegmentReader,
+    collector::Collector, collector::SegmentCollector, fastfield::BytesFastFieldReader,
+    schema::Field, DocId, Score, SegmentLocalId, SegmentReader,
 };
-pub struct Bitmap {
-    bit_map: RoaringBitmap,
-}
+#[derive(Default)]
+pub struct Bitmap;
 
-impl Collector for Count {
+impl Collector for Bitmap {
     type Fruit = RoaringBitmap;
 
-    type Child = SegmentCountCollector;
+    type Child = SegmentBitMapCollector;
 
     fn for_segment(
         &self,
-        sl: SegmentLocalId,
+        _: SegmentLocalId,
         sr: &SegmentReader,
-    ) -> crate::Result<SegmentCountCollector> {
-        sr.fast_fields().bytes(Field::from_field_id(ID_BYTES_INDEX));
-        Ok(SegmentCountCollector::default())
+    ) -> tantivy::Result<SegmentBitMapCollector> {
+        Ok(SegmentBitMapCollector {
+            bit_map: RoaringBitmap::new(),
+            fast_field: sr.fast_fields().bytes(Field::from_field_id(ID_BYTES_INDEX)),
+        })
     }
 
     fn requires_scoring(&self) -> bool {
         false
     }
 
-    fn merge_fruits(&self, segment_counts: Vec<usize>) -> crate::Result<usize> {
-        Ok(segment_counts.into_iter().sum())
+    fn merge_fruits(&self, segment_bitmaps: Vec<RoaringBitmap>) -> tantivy::Result<RoaringBitmap> {
+        let result = segment_bitmaps
+            .iter()
+            .fold(RoaringBitmap::default(), |r, v| r | v);
+
+        return Ok(result);
     }
 }
 
-pub struct SegmentBitMapCollector<'a> {
-    bit_map: &'a Mutex<RoaringBitmap>,
-    reader: BytesFastFieldReader,
+pub struct SegmentBitMapCollector {
+    bit_map: RoaringBitmap,
+    fast_field: Option<BytesFastFieldReader>,
 }
 
 impl SegmentCollector for SegmentBitMapCollector {
     type Fruit = RoaringBitmap;
 
     fn collect(&mut self, doc_id: DocId, _: Score) {
-        if Some(r) = self.as_ref() {
-            r.get_bytes(doc_id);
+        if let Some(ffr) = self.fast_field.as_ref() {
+            let v = ffr.get_bytes(doc_id);
+            if v.len() > 0 {
+                self.bit_map.insert(slice_i64(v) as u32);
+            }
         }
     }
 
-    fn harvest(self) -> usize {
-        self.count
+    fn harvest(self) -> Self::Fruit {
+        self.bit_map
     }
 }

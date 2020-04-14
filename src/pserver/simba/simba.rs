@@ -137,22 +137,30 @@ impl Simba {
     }
 
     pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
-        match self.tantivy.search(sdreq) {
-            Ok(r) => r,
-            Err(e) => {
-                let e = cast_to_err(e);
-                SearchDocumentResponse {
-                    code: e.0 as i32,
-                    total: 0,
-                    hits: vec![],
-                    info: Some(SearchInfo {
-                        error: 1,
-                        success: 0,
-                        message: format!("search document err:{}", e.1),
-                    }),
+        if sdreq.query.len() > 0 {
+            return match self.tantivy.query(sdreq) {
+                Ok(r) => r,
+                Err(e) => {
+                    let e = cast_to_err(e);
+                    SearchDocumentResponse {
+                        code: e.0 as i32,
+                        total: 0,
+                        hits: vec![],
+                        info: Some(SearchInfo {
+                            error: 1,
+                            success: 0,
+                            message: format!("search document err:{}", e.1),
+                        }),
+                    }
                 }
-            }
+            };
         }
+
+        // let bitmap = self.tantivy.filter(sdreq)?;
+
+        // self.faiss.search(bitmap);
+
+        panic!()
     }
 
     pub fn write(&self, req: WriteDocumentRequest, callback: WriteRaftCallback) -> ASResult<()> {

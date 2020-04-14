@@ -46,9 +46,18 @@
  message SearchDocumentRequest {
    repeated uint64 cpids = 1;
    string query = 2;
-   repeated string def_fields = 3;
-   uint32 size = 4;
+   string filter = 3;
+   repeated string def_fields = 4;
+   repeated VectorQuery vector_querys = 5; 
+   uint32 size = 6;
  }
+
+message VectorQuery{
+  string field = 1;
+  bytes vector = 2;
+  bool array = 3;
+}
+
  
  message SearchDocumentResponse {
    int32 code = 1;

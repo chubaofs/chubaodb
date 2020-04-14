@@ -173,7 +173,9 @@ impl MultiplePartitionClient {
             .search(Request::new(SearchDocumentRequest {
                 cpids: self.collection_partition_ids,
                 query: query,
+                filter: String::default(),
                 def_fields: def_fields,
+                vector_querys: Vec::default(),
                 size: size,
             }))
             .await
