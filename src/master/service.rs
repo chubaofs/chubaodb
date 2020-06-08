@@ -19,9 +19,12 @@ use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::time::*;
 use crate::util::{coding, config::Config, entity::*, error::*};
+use crate::*;
+use async_std::sync::{Mutex, RwLock};
 use log::{error, info, warn};
+use rand::Rng;
+use std::cmp;
 use std::sync::Arc;
-use std::sync::{Mutex, RwLock};
 
 pub struct MasterService {
     ps_cli: PsClient,
@@ -40,39 +43,23 @@ impl MasterService {
         })
     }
 
-    pub fn start(&self) -> ASResult<()> {
-        match self.meta_service.put(&Zone {
-            id: Some(0),
-            name: Some(String::from("default")),
-        }) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn create_zone(&self, zone: Zone) -> ASResult<Zone> {
-        self.meta_service.create(&zone)?;
-        Ok(zone)
-    }
-
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
-        let _lock = self.collection_lock.lock().unwrap();
+        let _lock = self.collection_lock.lock().await;
         //1.query collection
         let c: Collection = self.get_collection(collection_name)?;
 
-        let cid = c.id.unwrap();
         //delete collection
         self.meta_service.delete_keys(vec![
             entity_key::collection_name(collection_name),
-            entity_key::collection(c.id.unwrap()),
+            entity_key::collection(c.id),
         ])?;
 
         //3.offload partition
-        for pid in c.partitions.as_ref().unwrap() {
-            if let Err(e) = self.offload_partition(cid, *pid, 0).await {
+        for pid in c.partitions.iter() {
+            if let Err(e) = self.offload_partition(c.id, *pid, 0).await {
                 error!(
                     "offload collection:{} partition:{} has err:{:?}",
-                    cid, pid, e
+                    c.id, pid, e
                 );
             }
         }
@@ -82,19 +69,35 @@ impl MasterService {
 
     pub async fn create_collection(&self, mut collection: Collection) -> ASResult<Collection> {
         info!("begin to create collection");
-        let _lock = self.collection_lock.lock().unwrap();
+        let _lock = self.collection_lock.lock().await;
+
+        if collection.name == "" {
+            return result_def!("collection name is none");
+        }
+
+        if collection.partition_num <= 0 {
+            error!("partition_num:{} is invalid", collection.partition_num);
+            return result_def!("partition_num:{} is invalid", collection.partition_num);
+        }
+
+        if collection.partition_replica_num == 0 {
+            return result_def!(
+                "partition_replica_num:{} is invalid",
+                collection.partition_replica_num
+            );
+        }
 
         //check collection exists
-        match self.get_collection(collection.get_name()) {
+        match self.get_collection(&collection.name) {
             Ok(_) => {
-                return Err(err_code_box(
-                    ALREADY_EXISTS,
-                    format!("the collection:{} already exist", collection.get_name()),
-                ))
+                return result!(
+                    Code::AlreadyExists,
+                    "collection:{} already exists",
+                    collection.name
+                )
             }
             Err(e) => {
-                let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
+                if e.code() != Code::RocksDBNotFound {
                     return Err(e);
                 }
             }
@@ -103,39 +106,59 @@ impl MasterService {
         let seq = self.meta_service.increase_id(entity_key::SEQ_COLLECTION)?;
 
         info!("no coresponding collection found, begin to create connection ");
+        let mut vector_index = Vec::new();
+        let mut scalar_index = Vec::new();
         if collection.fields.len() > 0 {
-            for f in collection.get_mut_fields().iter_mut() {
-                if let Some(e) = validate_and_set_field(f) {
-                    return Err(Box::new(e));
+            for (i, f) in collection.fields.iter_mut().enumerate() {
+                validate_and_set_field(f)?;
+                if f.is_vector() {
+                    vector_index.push(i);
+                } else {
+                    scalar_index.push(i)
                 }
             }
         }
         info!("all fields valid.");
-        collection.id = Some(seq);
-        collection.status = Some(CollectionStatus::CREATING);
-        collection.modify_time = Some(current_millis());
+        collection.id = seq;
+        collection.status = CollectionStatus::CREATING;
+        collection.modify_time = current_millis();
+        collection.vector_field_index = vector_index;
+        collection.scalar_field_index = scalar_index;
 
-        //let zones = &collection.zones;
-        let need_num = collection.partition_num.unwrap();
+        let partition_num = collection.partition_num;
 
-        // TODO default zone ID
+        if partition_num == 0 {
+            return result_def!("partition_num:{} is invalid", partition_num);
+        }
+
+        let partition_replica_num = collection.partition_replica_num;
+
+        if partition_replica_num == 0 {
+            return result_def!("partition_replica_num:{} is invalid", partition_replica_num);
+        }
+
         let server_list: Vec<PServer> = self
             .meta_service
             .list(entity_key::pserver_prefix().as_str())?;
 
+        let need_num = cmp::max(partition_num, partition_replica_num);
         if need_num as usize > server_list.len() {
-            return Err(Box::from(err(format!(
+            return result_def!(
                 "need pserver size:{} but all server is:{}",
                 need_num,
                 server_list.len()
-            ))));
+            );
         }
         let mut use_list: Vec<PServer> = Vec::new();
+        let random = rand::thread_rng().gen_range(0, server_list.len());
         //from list_server find need_num for use
-        for s in server_list.iter() {
+        let mut index = random % server_list.len();
+        let mut detected_times = 1;
+        loop {
+            let s = server_list.get(index).unwrap();
             let ok = match self.ps_cli.status(s.addr.as_str()).await {
-                Ok(gr) => match gr.code as u16 {
-                    ENGINE_WILL_CLOSE => false,
+                Ok(gr) => match Code::from_i32(gr.code) {
+                    Code::EngineWillClose => false,
                     _ => true,
                 },
                 Err(e) => {
@@ -147,53 +170,84 @@ impl MasterService {
                 continue;
             }
             use_list.push(s.clone());
-            if use_list.len() >= need_num as usize {
+            if use_list.len() >= need_num as usize || detected_times >= server_list.len() {
                 break;
             }
+            index += 1;
+            detected_times += 1;
         }
 
-        let mut partitions = Vec::with_capacity(need_num as usize);
-        let mut pids = Vec::with_capacity(need_num as usize);
-        let mut slots = Vec::with_capacity(need_num as usize);
-        let range = u32::max_value() / need_num;
+        if need_num as usize > use_list.len() {
+            return result_def!(
+                "need pserver size:{} but available server is:{}",
+                need_num,
+                use_list.len()
+            );
+        }
 
+        let mut partitions = Vec::with_capacity(partition_num as usize);
+        let mut pids = Vec::with_capacity(partition_num as usize);
+        let mut slots = Vec::with_capacity(partition_num as usize);
+        let range = u32::max_value() / partition_num;
         for i in 0..need_num {
             let server = use_list.get(i as usize).unwrap();
             pids.push(i);
             slots.push(i * range);
+            let mut replicas: Vec<Replica> = Vec::new();
+            for j in 0..partition_replica_num {
+                let id = use_list
+                    .get((i + j % need_num) as usize)
+                    .unwrap()
+                    .id
+                    .unwrap();
+                replicas.push(Replica {
+                    node_id: id,
+                    replica_type: ReplicaType::NORMAL,
+                });
+            }
             let partition = Partition {
                 id: i,
                 collection_id: seq,
                 leader: server.addr.to_string(),
                 version: 0,
+                replicas: replicas,
             };
+
             partitions.push(partition.clone());
         }
 
-        collection.slots = Some(slots);
-        collection.partitions = Some(pids);
+        collection.slots = slots;
+        collection.partitions = pids;
 
-        let collection_name = collection.name.clone().unwrap();
         info!("prepare add collection info:{}", partitions.len());
 
         self.meta_service.create(&collection)?;
+        self.meta_service.put_batch(&partitions)?;
 
         for c in partitions {
+            let mut replicas: Vec<ReplicaInfo> = vec![];
+            for r in c.replicas {
+                replicas.push(ReplicaInfo {
+                    node: r.node_id,
+                    replica_type: r.replica_type as u32,
+                });
+            }
             PartitionClient::new(c.leader)
                 .load_or_create_partition(PartitionRequest {
                     partition_id: c.id,
                     collection_id: c.collection_id,
                     readonly: false,
                     version: 0,
+                    replicas: replicas,
                 })
                 .await?;
         }
 
-        collection.status = Some(CollectionStatus::WORKING);
+        collection.status = CollectionStatus::WORKING;
         self.meta_service.put(&collection)?;
         self.meta_service.put_kv(
-            entity_key::collection_name(collection_name.as_str()).as_str(),
-            &coding::u32_slice(collection.id.unwrap())[..],
+            entity_key::collection_name(collection.name.as_str()).as_str(),
+            &coding::u32_slice(collection.id)[..],
         )?;
         Ok(collection)
     }
@@ -219,7 +273,7 @@ impl MasterService {
     pub fn update_server(&self, mut server: PServer) -> ASResult<PServer> {
         server.modify_time = current_millis();
         self.meta_service.put(&server)?;
-        Ok(server)
+        return Ok(server);
     }
 
     pub fn list_servers(&self) -> ASResult<Vec<PServer>> {
@@ -232,8 +286,54 @@ impl MasterService {
             .get(entity_key::pserver(server_addr).as_str())
     }
 
-    pub fn list_zones(&self) -> ASResult<Vec<Zone>> {
-        self.meta_service.list(entity_key::zone_prefix().as_str())
+    pub fn register(&self, mut server: PServer) -> ASResult<PServer> {
+        match self.get_server(server.addr.clone().as_ref()) {
+            Ok(ps) => Ok(ps),
+            Err(e) => {
+                if e.code() != Code::RocksDBNotFound {
+                    return Err(e);
+                }
+                let seq = self.meta_service.increase_id(entity_key::SEQ_PSERVER)?;
+                server.id = Some(seq);
+
+                match self.meta_service.put_kv(
+                    &entity_key::pserver_id(seq).as_str(),
+                    &server.addr.as_bytes(),
+                ) {
+                    Ok(_) => {}
+                    Err(e) => return Err(e),
+                }
+                match self.meta_service.create(&server) {
+                    Ok(_) => {
+                        return Ok(server);
+                    }
+                    Err(e) => {
+                        if e.code() != Code::AlreadyExists {
+                            return Err(e);
+                        }
+                        match self.get_server(&server.addr.as_str()) {
+                            Ok(pserver) => {
+                                return Ok(pserver);
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
+        match self
+            .meta_service
+            .get_kv(entity_key::pserver_id(server_id).as_str())
+        {
+            Ok(v) => match String::from_utf8(v) {
+                Ok(v) => Ok(v),
+                Err(e) => result_def!("Invalid server addr UTF-8 sequence:{:?}", e),
+            },
+            Err(e) => Err(e),
+        }
     }
 
     pub fn list_partitions(&self, collection_name: &str) -> ASResult<Vec<Partition>> {
@@ -279,12 +379,7 @@ impl MasterService {
             }
 
             if let Err(e) = self.offload_partition(cid, pid, old_version).await {
-                error!(
-                    "offload collection:{} partition:{} failed. err:{:?}",
-                    cid, pid, e
-                );
-                let e = cast_to_err(e);
-                if e.0 == VERSION_ERR {
+                if e.code() == Code::VersionErr {
                     return Err(e);
                 }
                 sleep!(300);
@@ -309,12 +404,7 @@ impl MasterService {
                     return Ok(());
                 }
                 Err(e) => {
-                    error!(
-                        "load collection:{} partition:{} failed. err:{:?}",
-                        cid, pid, e
-                    );
-                    let e = cast_to_err(e);
-                    if e.0 == VERSION_ERR {
+                    if e.code() == Code::VersionErr {
                         return Err(e);
                     }
                     sleep!(300);
@@ -322,7 +412,7 @@ impl MasterService {
                 }
             }
         }
-        return Err(err_str_box("tansfer has err"));
+        return result_def!("tansfer has err");
     }
 
     async fn load_or_create_partition(
@@ -341,23 +431,23 @@ impl MasterService {
 
         //check version
         if partition.version > version {
-            return Err(err_code_box(
-                VERSION_ERR,
-                format!(
-                    "load version has version err expected:{} , found:{} ",
-                    version, partition.version,
-                ),
-            ));
+            return result!(
+                Code::VersionErr,
+                "load version has version err expected:{} , found:{} ",
+                version,
+                partition.version,
+            );
         }
 
         // load begin to try offload partition, try not to repeat the load
         for ps in self.list_servers()? {
             for wp in ps.write_partitions {
                 if (wp.collection_id, wp.id) == (collection_id, partition_id) {
-                    return Err(err_code_box(
-                        PARTITION_CAN_NOT_LOAD,
-                        format!("partition has been used in server:{}", ps.addr),
-                    ));
+                    return result!(
+                        Code::PartitionLoadErr,
+                        "partition has been used in server:{}",
+                        ps.addr
+                    );
                 }
             }
         }
@@ -368,6 +458,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await
     }
@@ -387,6 +478,7 @@ impl MasterService {
                             partition_id: partition_id,
                             readonly: false,
                             version: version,
+                            replicas: vec![],
                         })
                         .await?;
                 }
@@ -401,6 +493,7 @@ impl MasterService {
                 partition_id: partition_id,
                 readonly: false,
                 version: version,
+                replicas: vec![],
             })
             .await?;
 
@@ -408,22 +501,22 @@ impl MasterService {
     }
 
     pub async fn update_partition(&self, partition: Partition) -> ASResult<()> {
-        let _lock = self.partition_lock.write().unwrap();
+        let _lock = self.partition_lock.write().await;
         match self.get_partition(partition.collection_id, partition.id) {
             Ok(p) => {
                 if p.version >= partition.version {
-                    return Err(err_code_box(
-                        VERSION_ERR,
-                        format!(
-                            "the collection:{} partition:{} version not right expected:{} found:{}",
-                            partition.collection_id, partition.id, partition.version, p.version
-                        ),
-                    ));
+                    return result!(
+                        Code::VersionErr,
+                        "the collection:{} partition:{} version not right expected:{} found:{}",
+                        partition.collection_id,
+                        partition.id,
+                        partition.version,
+                        p.version
+                    );
                 }
             }
             Err(e) => {
-                let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
+                if e.code() != Code::RocksDBNotFound {
                     return Err(e);
                 }
             }
@@ -432,44 +525,12 @@ impl MasterService {
     }
 }
 
-fn validate_and_set_field(field: &mut Field) -> Option<GenericError> {
-    if field.name.is_none() {
-        return Some(err(format!("unset field name in field:{:?}", field)));
+fn validate_and_set_field(field: &mut Field) -> ASResult<()> {
+    if field.name().trim() == "" {
+        return result_def!("unset field name in field:{:?}", field);
     }
 
-    match field.field_type.as_ref() {
-        Some(v) => match v.as_str() {
-            "text" => field.internal_type = Some(FieldType::TEXT),
-            "string" => field.internal_type = Some(FieldType::STRING),
-            "integer" => field.internal_type = Some(FieldType::INTEGER),
-            "double" => field.internal_type = Some(FieldType::DOUBLE),
-            _ => {
-                return Some(err(format!(
-                    "unknow field:{} type:{}",
-                    field.name.as_ref().unwrap(),
-                    v
-                )));
-            }
-        },
-        None => {
-            return Some(err(format!(
-                "the field:{} must set type",
-                field.name.as_ref().unwrap()
-            )));
-        }
-    };
-
-    if field.index.is_none() {
-        field.index = Some(true);
-    }
-    if field.array.is_none() {
-        field.array = Some(false);
-    }
-    if field.store.is_none() {
-        field.store = Some(true);
-    }
-
-    None
+    Ok(())
 }
 
 #[test]

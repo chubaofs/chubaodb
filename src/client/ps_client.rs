@@ -12,15 +12,16 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
+use crate::client::partition_client::*;
 use crate::pserverpb::rpc_client::RpcClient;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
+use crate::*;
+use async_std::{sync::channel, task};
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tonic::transport::{Channel, Endpoint};
-
-use crate::client::partition_client::*;
 
 const RETRY: usize = 5;
 
@@ -74,7 +75,6 @@ impl PsClient {
                     return Ok(r);
                 }
                 Err(e) => {
-                    let e = cast_to_err(e);
                     if self.check_err_cache(i, collection_name.as_str(), &e) {
                         continue 'outer;
                     } else {
@@ -109,6 +109,7 @@ impl PsClient {
                     slot: ps.slot,
                     partition_id: ps.partition_id,
                     version: version,
+                    vectors: Vec::default(),
                 }),
                 write_type: wt,
             },
@@ -131,7 +132,6 @@ impl PsClient {
                     return Ok(r);
                 }
                 Err(e) => {
-                    let e = cast_to_err(e);
                     if self.check_err_cache(i, collection_name.as_str(), &e) {
                         continue 'outer;
                     } else {
@@ -167,34 +167,28 @@ impl PsClient {
         collection_name: &str,
         query: String,
         def_fields: Vec<String>,
+        vector_query: Option<VectorQuery>,
         size: u32,
     ) -> ASResult<SearchDocumentResponse> {
         'outer: for i in 0..RETRY {
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<SearchDocumentResponse>(10);
+            let (tx, rx) = channel::<SearchDocumentResponse>(10);
 
             match self.select_collection(collection_name).await {
                 Ok(mpl) => {
                     for mp in mpl {
-                        let mut tx = tx.clone();
+                        let tx = tx.clone();
                         let query = query.clone();
                         let def_fields = def_fields.clone();
-                        tokio::spawn(async move {
-                            match mp.search(query, def_fields, size).await {
+                        let vq = vector_query.clone();
+                        task::spawn(async move {
+                            match mp.search(query, def_fields, vq, size).await {
                                 Ok(resp) => {
                                     if let Err(e) = tx.try_send(resp) {
                                         error!("send result has err:{:?}", e); //TODO: if errr
                                     };
                                 }
                                 Err(e) => {
-                                    let e = cast_to_err(e);
-                                    let mut resp = SearchDocumentResponse::default();
-                                    resp.code = e.0 as i32;
-                                    resp.info = Some(SearchInfo {
-                                        error: 1,
-                                        success: 0,
-                                        message: e.1,
-                                    });
-                                    if let Err(e) = tx.try_send(resp) {
+                                    if let Err(e) = tx.try_send(e.into()) {
                                         error!("send result has err:{:?}", e); //TODO: if errr
                                     };
                                 }
@@ -203,7 +197,6 @@ impl PsClient {
                     }
                 }
                 Err(e) => {
-                    let e = cast_to_err(e);
                     if self.check_err_cache(i, collection_name, &e) {
                         continue;
                     } else {
@@ -212,30 +205,26 @@ impl PsClient {
                 }
             };
 
-            let empty = |_v: tokio::sync::mpsc::Sender<SearchDocumentResponse>| {};
-
-            empty(tx);
+            // drop(tx);
 
             let mut dist = rx.recv().await.unwrap();
 
-            if dist.code as u16 != SUCCESS
+            if Code::from_i32(dist.code) != Code::Success
                 && self.check_response_cache(
                     i,
                     collection_name,
-                    dist.code as u16,
-                    dist.info.as_ref().unwrap().message.clone(),
+                    err!(dist.code, msg_for_search_resp(&dist)),
                 )
             {
                 continue 'outer;
             }
 
-            while let Some(src) = rx.recv().await {
-                if src.code as u16 != SUCCESS
+            while let Ok(src) = rx.recv().await {
+                if Code::from_i32(src.code) != Code::Success
                     && self.check_response_cache(
                         i,
                         collection_name,
-                        src.code as u16,
-                        src.info.as_ref().unwrap().message.clone(),
+                        err!(dist.code, msg_for_search_resp(&dist)),
                     )
                 {
                     continue 'outer;
@@ -250,13 +239,13 @@ impl PsClient {
 
     pub async fn count(&self, collection_name: &str) -> ASResult<CountDocumentResponse> {
         'outer: for i in 0..RETRY {
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<CountDocumentResponse>(10);
+            let (tx, rx) = channel::<CountDocumentResponse>(10);
 
             match self.select_collection(collection_name).await {
                 Ok(mpl) => {
                     for mp in mpl {
-                        let mut tx = tx.clone();
-                        tokio::spawn(async move {
+                        let tx = tx.clone();
+                        task::spawn(async move {
                             match mp.count().await {
                                 Ok(resp) => {
                                     if let Err(e) = tx.try_send(resp) {
@@ -264,14 +253,7 @@ impl PsClient {
                                     };
                                 }
                                 Err(e) => {
-                                    let e = cast_to_err(e);
-                                    let mut resp = CountDocumentResponse::default();
-                                    resp.code = e.0 as i32;
-                                    resp.message = format!(
-                                        "partition:{:?} has err:{}",
-                                        mp.collection_partition_ids, e.1
-                                    );
-                                    if let Err(e) = tx.try_send(resp) {
+                                    if let Err(e) = tx.try_send(e.into()) {
                                         error!("send result has err:{:?}", e); //TODO: if errr
                                     };
                                 }
@@ -280,7 +262,6 @@ impl PsClient {
                     }
                 }
                 Err(e) => {
-                    let e = cast_to_err(e);
                     if self.check_err_cache(i, collection_name, &e) {
                         continue;
                     } else {
@@ -289,31 +270,17 @@ impl PsClient {
                 }
             };
 
-            let empty = |_v: tokio::sync::mpsc::Sender<CountDocumentResponse>| {};
-
-            empty(tx);
-
             let mut dist = rx.recv().await.unwrap();
 
-            if dist.code as u16 != SUCCESS
-                && self.check_response_cache(
-                    i,
-                    collection_name,
-                    dist.code as u16,
-                    dist.message.clone(),
-                )
+            if Code::from_i32(dist.code) != Code::Success
+                && self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
             {
                 continue 'outer;
             }
 
-            while let Some(src) = rx.recv().await {
-                if src.code as u16 != SUCCESS
-                    && self.check_response_cache(
-                        i,
-                        collection_name,
-                        src.code as u16,
-                        src.message.clone(),
-                    )
+            while let Ok(src) = rx.recv().await {
+                if Code::from_i32(src.code) != Code::Success
+                    && self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
                 {
                     continue 'outer;
                 }
@@ -333,8 +300,8 @@ impl PsClient {
             })
             .await?;
 
-        if result.code as u16 != SUCCESS {
-            return Err(err_code_box(result.code as u16, result.message));
+        if Code::from_i32(result.code) != Code::Success {
+            return result!(result.code, result.message);
         }
 
         Ok(result)
@@ -342,7 +309,6 @@ impl PsClient {
 
     async fn select_collection(&self, name: &str) -> ASResult<Vec<MultiplePartitionClient>> {
         let c: Arc<CollectionInfo> = self.cache_collection(name).await?;
-        let cid = c.collection.id.unwrap();
 
         let mut map = HashMap::new();
 
@@ -352,7 +318,7 @@ impl PsClient {
                 .or_insert(MultiplePartitionClient::new(partition.leader.clone()));
 
             mp.collection_partition_ids
-                .push(coding::merge_u32(cid, partition.id));
+                .push(coding::merge_u32(c.collection.id, partition.id));
         }
 
         return Ok(map
@@ -363,21 +329,19 @@ impl PsClient {
 
     async fn select_partition(&self, name: &str, id: &str) -> ASResult<PartitionClient> {
         let c: Arc<CollectionInfo> = self.cache_collection(name).await?;
-        let cid = c.collection.id.unwrap();
-        let len = c.collection.partitions.as_ref().unwrap().len();
         let slot = coding::hash_str(id) as u32;
-        if len == 1 {
+        if c.collection.partitions.len() == 1 {
             let p = &c.partitions[0];
             let pc = PartitionClient {
                 addr: p.leader.to_string(),
-                collection_id: cid,
+                collection_id: c.collection.id,
                 partition_id: p.id,
                 slot: slot,
             };
             return Ok(pc);
         }
 
-        let pid = match c.collection.slots.as_ref().unwrap().binary_search(&slot) {
+        let pid = match c.collection.slots.binary_search(&slot) {
             Ok(i) => i,
             Err(i) => i - 1,
         };
@@ -419,15 +383,14 @@ impl PsClient {
         let mut cache_field = HashMap::with_capacity(collection.fields.len());
 
         collection.fields.iter().for_each(|f| {
-            cache_field.insert(f.name.as_ref().unwrap().to_string(), f.clone());
+            cache_field.insert(f.name().to_string(), f.clone());
         });
 
         //to load partitions
-        let cid = collection.id.unwrap();
         let mut partitions = Vec::new();
 
-        for pid in collection.partitions.as_ref().unwrap() {
-            let partition = self.meta_cli.get_partition(cid, *pid).await?;
+        for pid in collection.partitions.iter() {
+            let partition = self.meta_cli.get_partition(collection.id, *pid).await?;
             partitions.push(partition);
         }
 
@@ -444,12 +407,12 @@ impl PsClient {
         Ok(c.clone())
     }
 
-    fn check_err_cache(&self, i: usize, cname: &str, e: &Box<GenericError>) -> bool {
+    fn check_err_cache(&self, i: usize, cname: &str, e: &ASError) -> bool {
         if i + 1 == RETRY {
             return false;
         }
-        match e.0 {
-            NOT_FOUND => {
+        match e.code() {
+            Code::RocksDBNotFound => {
                 warn!("to remove cache by collection:{}", cname);
                 self.collection_cache.write().unwrap().remove(cname);
                 true
@@ -458,11 +421,10 @@ impl PsClient {
         }
     }
 
-    fn check_response_cache(&self, i: usize, cname: &str, code: u16, msg: String) -> bool {
-        if code == SUCCESS {
+    fn check_response_cache(&self, i: usize, cname: &str, e: ASError) -> bool {
+        if e == ASError::Success {
             return false;
         }
-        let e = Box::new(GenericError(code, msg));
         self.check_err_cache(i, cname, &e)
     }
 

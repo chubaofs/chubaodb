@@ -11,11 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use crate::client::partition_client::PartitionClient;
 use crate::client::ps_client::PsClient;
 use crate::pserverpb::*;
 use crate::util::{config::Config, error::*};
-use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub struct RouterService {
@@ -27,33 +25,6 @@ impl RouterService {
         Ok(RouterService {
             ps_client: PsClient::new(conf),
         })
-    }
-
-    pub async fn command(&self, bytes: Vec<u8>) -> ASResult<Vec<Value>> {
-        let v: Value = serde_json::from_slice(bytes.as_slice()).unwrap();
-        let target: Vec<String> = v["target"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap().to_string())
-            .collect();
-
-        let mut result = Vec::with_capacity(target.len());
-
-        for addr in target {
-            let rep = PartitionClient::new(addr.clone())
-                .command(CommandRequest {
-                    body: bytes.clone(),
-                })
-                .await?;
-
-            let rep: Value = serde_json::from_slice(rep.body.as_slice()).unwrap();
-            result.push(json!({
-                "addr":addr,
-                "result":rep,
-            }));
-        }
-        Ok(result)
     }
 
     pub async fn write(
@@ -84,10 +55,17 @@ impl RouterService {
         collection_names: Vec<String>,
         def_fields: Vec<String>,
         query: String,
+        vector_query: Option<VectorQuery>,
         size: u32,
     ) -> ASResult<SearchDocumentResponse> {
         self.ps_client
-            .search(collection_names[0].as_str(), query, def_fields, size)
+            .search(
+                collection_names[0].as_str(),
+                query,
+                def_fields,
+                vector_query,
+                size,
+            )
             .await
     }
 

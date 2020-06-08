@@ -1,32 +1,31 @@
-version: '2.1'
+version: "2.1"
 
 networks:
     extnetwork:
-      name: chubaodb-extnetwork  
-      ipam:
-         config:
-         - subnet: 192.168.0.0/24
-           gateway: 192.168.0.1
+        name: chubaodb-extnetwork
+        ipam:
+            config:
+                - subnet: 192.168.0.0/24
+                  gateway: 192.168.0.1
 
 services:
     build:
-        image: rust:latest
+        image: ansj/chubaodb_base:1.6.3
         volumes:
             - ../:/rust/chubaodb
-            - ~/.cargo/registry/:/usr/local/cargo/registry/
+            - ~/.cargo/registry/:/root/.cargo/registry/
+            - ~/.cargo/git/:/root/.cargo/git/
         command:
             - bash
             - "-c"
             - >-
-              set -e;
-              echo "Install clang...";
-              apt-get update &> /dev/null && apt-get install clang -y &> /dev/null;
-              echo "Install rustup component 'rustfmt'...";
-              rustup component add rustfmt --toolchain 1.41.0-x86_64-unknown-linux-gnu &> /dev/null;
-              cd /rust/chubaodb;
-              echo "Build project...";
-              cargo build --release;
-              cp /rust/chubaodb/target/release/chubaodb /rust/chubaodb/docker/build/
+                set -e;
+                export LD_LIBRARY_PATH=/usr/local/lib;
+                cd /rust/chubaodb;
+                source ~/.cargo/env;
+                cargo clean;
+                echo "Build project...";
+                cargo build --release;
+                cp /rust/chubaodb/target/release/chubaodb /rust/chubaodb/docker/build/
         networks:
             extnetwork:
-

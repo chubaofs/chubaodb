@@ -12,6 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::util::{config::*, entity::*, error::*, http_client};
+use crate::*;
 use std::str;
 use std::sync::Arc;
 
@@ -32,7 +33,7 @@ impl MetaClient {
 
         match value.get("ip") {
             Some(ip) => Ok(ip.as_str().unwrap().to_string()),
-            None => Err(err_box(format!("got ip from master:{} is no ip", url))),
+            None => result_def!("got ip from master:{} is no ip", url),
         }
     }
 
@@ -42,9 +43,9 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn heartbeat(&self, zone_id: u32, ip: &str, port: u32) -> ASResult<PServer> {
-        let url = format!("http://{}/pserver/heartbeat", self.conf.master_addr());
-        let pserver = PServer::new(zone_id, format!("{}:{}", ip, port));
+    pub async fn register(&self, ip: &str, port: u32) -> ASResult<PServer> {
+        let url = format!("http://{}/pserver/register", self.conf.master_addr());
+        let pserver = PServer::new(self.conf.ps.zone.clone(), None, format!("{}:{}", ip, port));
         http_client::post_json(&url, DEF_TIME_OUT, &pserver).await
     }
 
@@ -86,5 +87,19 @@ impl MetaClient {
         );
 
         http_client::get_json(&url, DEF_TIME_OUT).await
+    }
+
+    pub async fn get_server_addr_by_id(&self, server_id: u64) -> ASResult<String> {
+        let url = format!(
+            "http://{}/pserver/get_addr_by_id/{}",
+            self.conf.master_addr(),
+            server_id,
+        );
+        let value: serde_json::Value = http_client::get_json(&url, DEF_TIME_OUT).await?;
+
+        match value.get("addr") {
+            Some(addr) => Ok(addr.as_str().unwrap().to_string()),
+            None => result_def!("got addr from master:{} is no addr", url),
+        }
     }
 }

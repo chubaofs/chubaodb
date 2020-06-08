@@ -1,139 +1,218 @@
-// Copyright 2020 The Chubao Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-// implied. See the License for the specific language governing
-// permissions and limitations under the License.
-use crate::util;
-use http::status::StatusCode;
-use serde_derive::{Deserialize, Serialize};
+use crate::pserverpb::*;
+use log::error;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde_json::json;
+use std::convert::TryFrom;
+use std::error::Error;
 
-// the code need  >= 100 &&  >= 600 {
-pub const SUCCESS: u16 = 200;
-pub const INTERNAL_ERR: u16 = 500;
-pub const ENGINE_NOT_READY: u16 = 501;
-pub const CONN_ERR: u16 = 502;
-pub const NOT_FOUND: u16 = 503;
-pub const ALREADY_EXISTS: u16 = 504;
-pub const ENGINE_WILL_CLOSE: u16 = 505;
-pub const VERSION_ERR: u16 = 506;
-pub const PARTITION_NO_INDEX: u16 = 508;
-//cluster_lock
-pub const LOCKED_ALREADY: u16 = 514;
-pub const LOCKED_LEASE_EXPRIED: u16 = 515;
-pub const PARTITION_CAN_NOT_LOAD: u16 = 516;
-pub const FIELD_TYPE_ERR: u16 = 517;
-pub const INVALID: u16 = 599;
-pub fn http_code(code: u16) -> StatusCode {
-    match StatusCode::from_u16(code) {
-        Ok(sc) => sc,
-        Err(_) => StatusCode::from_u16(INVALID).ok().unwrap(),
-    }
+pub type ASResult<T> = std::result::Result<T, ASError>;
+
+#[macro_export]
+macro_rules! err {
+    ($code:expr , $arg:expr) => {{
+        use std::convert::TryFrom;
+        let code = match Code::try_from($code) {
+            Ok(c) => c,
+            Err(_) => Code::InvalidErr,
+        };
+        ASError::Error(code, format!("{}", $arg))
+    }};
+    ($code:expr , $($arg:tt)*) => {{
+        use std::convert::TryFrom;
+        let code = match Code::try_from($code) {
+            Ok(c) => c,
+            Err(_) => Code::InvalidErr,
+        };
+        ASError::Error(code, format!($($arg)*))
+    }};
 }
 
-//this value for write return message
-pub const ALL_WRITE_ERR_KEY: usize = 99999999;
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct GenericError(pub u16, pub String);
-
-impl std::fmt::Display for GenericError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "code:{} -> err:[{}]", self.0, self.1)
-    }
+#[macro_export]
+macro_rules! err_def {
+    ($arg:expr) => {{
+        ASError::Error(Code::InternalErr, format!("{}", $arg))
+    }};
+    ($($arg:tt)*) => {{
+        ASError::Error(Code::InternalErr, format!($($arg)*))
+    }};
 }
 
-impl std::error::Error for GenericError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
+#[macro_export]
+macro_rules! result {
+    ($code:expr , $arg:expr) => {{
+        Err(err!($code, $arg))
+    }};
+    ($code:expr , $($arg:tt)*) => {{
+        Err(err!($code, $($arg)*))
+    }};
 }
 
-impl GenericError {
-    pub fn to_json(&self) -> serde_json::Value {
-        json!({
-            "code": self.0,
-            "message": self.1
-        })
-    }
+#[macro_export]
+macro_rules! result_def {
+    ($arg:expr) => {{
+        Err(err_def!($arg))
+    }};
+    ($($arg:tt)*) => {{
+        Err(err_def!($($arg)*))
+    }};
 }
 
-pub type GResult<T> = std::result::Result<T, GenericError>;
-pub type ASResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+#[macro_export]
+macro_rules! result_obj_code {
+    ($obj:expr) => {{
+        use std::convert::TryFrom;
+        let code = match Code::try_from($obj.code) {
+            Ok(c) => c,
+            Err(_) => Code::InvalidErr,
+        };
 
-pub fn err(info: String) -> GenericError {
-    util::stack_trace();
-    GenericError(INTERNAL_ERR, info)
-}
-pub fn err_code(code: u16, info: String) -> GenericError {
-    util::stack_trace();
-    GenericError(code, info.to_string())
-}
-pub fn err_code_str(code: u16, info: &str) -> GenericError {
-    util::stack_trace();
-    GenericError(code, info.to_string())
-}
-pub fn err_str(info: &str) -> GenericError {
-    util::stack_trace();
-    GenericError(INTERNAL_ERR, info.to_string())
-}
-pub fn err_generic() -> GenericError {
-    util::stack_trace();
-    GenericError(INTERNAL_ERR, String::from("internal err"))
+        if code != Code::Success {
+            return result!(code, $obj.message);
+        } else {
+            return Ok($obj);
+        }
+    }};
 }
 
-pub fn err_box(info: String) -> Box<dyn std::error::Error> {
-    Box::from(err(info))
-}
-
-pub fn err_code_box(code: u16, info: String) -> Box<dyn std::error::Error> {
-    Box::from(err_code(code, info))
-}
-
-pub fn err_str_box(info: &str) -> Box<dyn std::error::Error> {
-    Box::from(err_str(info))
-}
-
-pub fn err_code_str_box(code: u16, info: &str) -> Box<dyn std::error::Error> {
-    Box::from(err_code_str(code, info))
-}
-
-pub fn err_generic_box() -> Box<dyn std::error::Error> {
-    Box::from(err_generic())
-}
-
-pub fn convert<T, E: ToString>(result: Result<T, E>) -> ASResult<T> {
+pub fn convert<T, E: std::fmt::Display>(result: Result<T, E>) -> ASResult<T> {
     match result {
         Ok(t) => Ok(t),
-        Err(e) => Err(Box::from(err(e.to_string()))),
+        Err(e) => Err(ASError::Error(Code::InternalErr, format!("{}", e))),
     }
 }
 
-pub fn convert_opt<T>(opt: Option<T>) -> ASResult<T> {
-    match opt {
-        Some(t) => Ok(t),
-        None => Err(Box::from(err(String::from("value is nil")))),
+#[derive(Debug, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Clone, Copy)]
+#[repr(i32)]
+pub enum Code {
+    Success = 200,
+    InternalErr = 550,
+    InvalidErr,
+    ParamError,
+    EngineNotReady,
+    EngineWillClose,
+    RocksDBNotFound,
+    AlreadyExists,
+    VersionErr,
+    SpaceNoIndex,
+    PartitionNotLeader,
+    PartitionNotInit,
+    PartitionLoadErr,
+    FieldTypeErr,
+    FieldValueErr,
+    LockedAlready,
+    LockedLeaseExpried,
+    HttpAPIRequestErr,
+    EncodingErr,
+    DencodingErr,
+}
+
+impl Code {
+    pub fn http_code(self) -> http::status::StatusCode {
+        let code: i32 = self.into();
+        match http::status::StatusCode::from_u16(code as u16) {
+            Ok(v) => v,
+            Err(_) => {
+                error!("the code:[{:?}] can not to http code", code);
+                http::status::StatusCode::from_u16(551).unwrap()
+            }
+        }
+    }
+
+    pub fn from_i32(w: i32) -> Code {
+        match Code::try_from(w) {
+            Ok(c) => c,
+            Err(_) => Code::InvalidErr,
+        }
     }
 }
 
-pub fn convert_opt_by_msg<T>(opt: Option<T>, err_msg: String) -> ASResult<T> {
-    match opt {
-        Some(t) => Ok(t),
-        None => Err(Box::from(err(err_msg))),
+#[derive(Debug, PartialEq)]
+pub enum ASError {
+    Success,
+    Error(Code, String),
+}
+
+impl ASError {
+    pub fn code(&self) -> Code {
+        match self {
+            ASError::Success => Code::Success,
+            ASError::Error(c, _) => *c,
+        }
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            ASError::Success => json!({
+                "code":200,
+                "message":"success",
+            }),
+            ASError::Error(c, m) => json!({
+                "code": *c as i32,
+                "message": m
+            }),
+        }
     }
 }
 
-pub fn cast_to_err(e: Box<dyn std::error::Error>) -> Box<GenericError> {
-    match e.downcast::<GenericError>() {
-        Ok(ge) => ge,
-        Err(e) => Box::from(err_code(INTERNAL_ERR, e.to_string())),
+impl std::fmt::Display for ASError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ASError::Error(code, msg) => write!(f, "code:{:?} -> err:[{}]", code, msg),
+            ASError::Success => write!(f, "code:200 -> success"),
+        }
+    }
+}
+
+impl<T: Error> From<T> for ASError {
+    fn from(t: T) -> Self {
+        ASError::Error(Code::HttpAPIRequestErr, t.to_string())
+    }
+}
+
+pub fn cast<E: std::fmt::Display>(e: E) -> ASError {
+    ASError::Error(Code::InternalErr, e.to_string())
+}
+
+impl Into<SearchDocumentResponse> for ASError {
+    fn into(self) -> SearchDocumentResponse {
+        SearchDocumentResponse {
+            code: self.code().into(),
+            total: 0,
+            hits: vec![],
+            info: Some(SearchInfo {
+                error: 1,
+                success: 0,
+                message: self.to_string(),
+            }),
+        }
+    }
+}
+
+impl Into<GeneralResponse> for ASError {
+    fn into(self) -> GeneralResponse {
+        GeneralResponse {
+            code: self.code().into(),
+            message: self.to_string(),
+        }
+    }
+}
+
+impl Into<DocumentResponse> for ASError {
+    fn into(self) -> DocumentResponse {
+        DocumentResponse {
+            code: self.code().into(),
+            message: self.to_string(),
+            doc: Vec::default(),
+        }
+    }
+}
+
+impl Into<CountDocumentResponse> for ASError {
+    fn into(self) -> CountDocumentResponse {
+        CountDocumentResponse {
+            code: self.code().into(),
+            message: self.to_string(),
+            ..Default::default()
+        }
     }
 }

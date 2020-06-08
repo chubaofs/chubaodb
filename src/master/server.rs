@@ -12,9 +12,14 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::master::cmd::*;
+use crate::master::graphql::{MasterSchema, Mutation, Query};
 use crate::master::service::MasterService;
 use crate::util::{config, entity::*, error::*};
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
+use crate::*;
+use actix_web::{guard, web, App, HttpRequest, HttpResponse, HttpServer};
+use async_graphql::http::{playground_source, GQLResponse, GraphQLPlaygroundConfig};
+use async_graphql::{EmptySubscription, Schema};
+use async_graphql_actix_web::GQLRequest;
 use log::{error, info, warn};
 use serde::Serialize;
 use serde_json::json;
@@ -22,36 +27,33 @@ use std::sync::{mpsc::Sender, Arc};
 
 #[actix_rt::main]
 pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Result<()> {
-    let arc_client = Arc::new(
-        MasterService::new(conf.clone()).expect(format!("master service init err").as_str()),
-    );
-
-    match arc_client.start() {
-        Ok(_) => {}
-        Err(e) => {
-            error!("master service start error. {}", e.to_string());
-        }
-    }
-
     let http_port = match conf.self_master() {
         Some(m) => m.http_port,
         None => panic!("self not set in config "),
     };
 
+    let service = Arc::new(
+        MasterService::new(conf.clone()).expect(format!("master service init err").as_str()),
+    );
+
+    let schema = Schema::build(Query, Mutation, EmptySubscription)
+        .data(service.clone())
+        .finish();
+
     info!("master listening on http://0.0.0.0:{}", http_port);
     HttpServer::new(move || {
         App::new()
-            .data(arc_client.clone())
+            .data(service.clone())
+            .data(schema.clone())
+            .service(web::resource("/").guard(guard::Post()).to(graphql))
+            .service(web::resource("/").guard(guard::Get()).to(graphiql))
             //admin handler
-            .route("/", web::get().to(domain))
             .route("/my_ip", web::get().to(my_ip))
-            //zone handler
-            .route("/zone/create", web::post().to(create_zone))
-            .route("/zone/list", web::get().to(list_zones))
             //pserver handler
             .route("/pserver/put", web::post().to(update_pserver))
             .route("/pserver/list", web::get().to(list_pservers))
-            .route("/pserver/heartbeat", web::post().to(heartbeat))
+            .route("/pserver/register", web::post().to(register))
+            .route("/pserver/get_addr_by_id", web::get().to(get_addr))
             //collection handler
             .route("/collection/create", web::post().to(create_collection))
             .route(
@@ -95,12 +97,17 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
     Ok(())
 }
 
-async fn domain() -> HttpResponse {
-    success_response(json!({
-        "anyindex":"master runing",
-        "version":config::VERSION,
-        "git_version": config::GIT_VERSION,
-    }))
+async fn graphql(
+    schema: web::Data<MasterSchema>,
+    gql_request: GQLRequest,
+) -> web::Json<GQLResponse> {
+    web::Json(GQLResponse(gql_request.into_inner().execute(&schema).await))
+}
+
+async fn graphiql() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(playground_source(GraphQLPlaygroundConfig::new("/")))
 }
 
 async fn my_ip(req: HttpRequest) -> HttpResponse {
@@ -117,19 +124,45 @@ async fn my_ip(req: HttpRequest) -> HttpResponse {
     }))
 }
 
-async fn create_collection(
-    rs: web::Data<Arc<MasterService>>,
-    info: web::Json<Collection>,
-) -> HttpResponse {
-    if info.name.is_none() {
+async fn create_collection(rs: web::Data<Arc<MasterService>>, info: web::Bytes) -> HttpResponse {
+    let info: Collection = match serde_json::from_slice(&info) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("create collection has err:{:?}", e);
+            return HttpResponse::build(Code::InternalErr.http_code())
+                .body(err_def!("create collection has err:{:?}", e).to_json());
+        }
+    };
+
+    if info.name == "" {
         info!("collection name is none");
-        return HttpResponse::build(http_code(INTERNAL_ERR))
-            .body(err_str("collection name is none").to_json());
+        return HttpResponse::build(Code::InternalErr.http_code())
+            .body(err_def!("collection name is none").to_json());
     }
 
-    let name = info.name.clone().unwrap();
+    if info.partition_num <= 0 {
+        info!("partition_num:{} is invalid", info.partition_num);
+        return HttpResponse::build(Code::InternalErr.http_code())
+            .body(err_def!("partition_num:{} is invalid", info.partition_num).to_json());
+    }
+
+    if info.partition_replica_num == 0 {
+        info!(
+            "partition_replica_num:{} is invalid",
+            info.partition_replica_num
+        );
+        return HttpResponse::build(Code::InternalErr.http_code()).body(
+            err_def!(
+                "partition_replica_num:{} is invalid",
+                info.partition_replica_num
+            )
+            .to_json(),
+        );
+    }
+
+    let name = info.name.clone();
     info!("prepare to create collection with name {}", name);
-    match rs.create_collection(info.into_inner()).await {
+    match rs.create_collection(info).await {
         Ok(s) => success_response(s),
         Err(e) => {
             error!(
@@ -226,8 +259,8 @@ async fn update_pserver(
     info: web::Json<PServer>,
 ) -> HttpResponse {
     info!(
-        "prepare to update pserver with address {}, zone_id {}",
-        info.addr, info.zone_id
+        "prepare to update pserver with address {}, zone {}",
+        info.addr, info.zone
     );
     match rs.update_server(info.into_inner()) {
         Ok(s) => success_response(s),
@@ -249,19 +282,30 @@ async fn list_pservers(rs: web::Data<Arc<MasterService>>) -> HttpResponse {
     }
 }
 
-async fn heartbeat(rs: web::Data<Arc<MasterService>>, info: web::Json<PServer>) -> HttpResponse {
-    info!(
-        "prepare to heartbeat with address {}, zone_id {}",
-        info.addr, info.zone_id
-    );
+async fn get_addr(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> HttpResponse {
+    info!("prepare to get pservers addr by server id");
 
-    let mut ps = match rs.get_server(info.addr.as_str()) {
+    let server_id: u32 = req.match_info().get("server_id").unwrap().parse().unwrap();
+    match rs.get_server_addr(server_id) {
+        Ok(s) => success_response(json!({ "addr": s })),
+        Err(e) => {
+            error!("list pserver failed, err: {}", e.to_string());
+            err_response(e)
+        }
+    }
+}
+
+async fn register(rs: web::Data<Arc<MasterService>>, info: web::Json<PServer>) -> HttpResponse {
+    let addr = info.addr.clone();
+    let zone = info.zone.clone();
+    info!("prepare to heartbeat with address {}, zone {}", addr, zone);
+    let mut ps = match rs.register(info.into_inner()) {
         Ok(s) => s,
         Err(e) => {
             error!(
-                "get server failed, zone_id:{}, server_addr:{}, err:{}",
-                info.zone_id,
-                info.addr,
+                "get server failed, zone:{}, server_addr:{}, err:{}",
+                zone,
+                addr,
                 e.to_string()
             );
             return err_response(e);
@@ -330,32 +374,6 @@ async fn get_partition(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> H
     }
 }
 
-async fn create_zone(rs: web::Data<Arc<MasterService>>, info: web::Json<Zone>) -> HttpResponse {
-    info!(
-        "prepare to create zone with id {}, name {}",
-        info.id.unwrap(),
-        info.name.as_ref().unwrap()
-    );
-    match rs.create_zone(info.into_inner()) {
-        Ok(s) => success_response(s),
-        Err(e) => {
-            error!("create zone failed, err:{}", e.to_string());
-            err_response(e)
-        }
-    }
-}
-
-async fn list_zones(rs: web::Data<Arc<MasterService>>) -> HttpResponse {
-    info!("prepare to list zones");
-    match rs.list_zones() {
-        Ok(s) => success_response(s),
-        Err(e) => {
-            error!("list zone failed, err:{}", e.to_string());
-            err_response(e)
-        }
-    }
-}
-
 async fn list_partitions(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> HttpResponse {
     let collection_name: String = req
         .match_info()
@@ -412,13 +430,13 @@ async fn transfer_partition(
     }
 }
 
-fn err_response(e: Box<dyn std::error::Error>) -> HttpResponse {
-    let e = cast_to_err(e);
-    return HttpResponse::build(http_code(e.0))
+fn err_response(e: ASError) -> HttpResponse {
+    return HttpResponse::build(e.code().http_code())
         .content_type("application/json")
         .body(e.to_json());
 }
 
-fn success_response<T: Serialize>(result: T) -> HttpResponse {
-    HttpResponse::build(http_code(SUCCESS)).json(result)
+fn success_response<T: Serialize + std::fmt::Debug>(result: T) -> HttpResponse {
+    info!("success_response [{:?}]", result);
+    HttpResponse::build(Code::Success.http_code()).json(result)
 }

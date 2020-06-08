@@ -16,6 +16,7 @@ use crate::util::config::Config;
 use crate::util::entity::{entity_key, MakeKey};
 use crate::util::error::*;
 use crate::util::time::*;
+use crate::*;
 use log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch, WriteOptions, DB};
 use serde::{de::DeserializeOwned, Serialize};
@@ -60,7 +61,7 @@ impl HARepository {
         if let Some(value) = self.db.get(key.as_bytes())? {
             let time_out = slice_u64(&value);
             if current_millis() >= time_out {
-                return Err(err_code_str_box(LOCKED_ALREADY, "has already lockd"));
+                return result!(Code::ParamError, "has already lockd");
             }
         }
 
@@ -72,7 +73,7 @@ impl HARepository {
         value.extend((current_millis() + ttl_mill).to_be_bytes().to_vec());
         value.extend(lease.as_bytes());
 
-        convert(batch.put(key.as_bytes(), value.as_slice()))?;
+        batch.put(key.as_bytes(), value.as_slice());
         let mut write_options = WriteOptions::default();
         write_options.disable_wal(false);
         write_options.set_sync(true);
@@ -91,17 +92,14 @@ impl HARepository {
             Some(v) => {
                 let time_out = slice_u64(&v);
                 if String::from_utf8_lossy(&v[8..]) != lease {
-                    return Err(err_code_str_box(
-                        LOCKED_LEASE_EXPRIED,
-                        "lease not locked for key",
-                    ));
+                    return result!(Code::LockedLeaseExpried, "lease not locked for key");
                 }
 
                 if current_millis() >= time_out {
-                    return Err(err_code_str_box(LOCKED_LEASE_EXPRIED, "lease is expried"));
+                    return result!(Code::LockedLeaseExpried, "lease is expried");
                 }
             }
-            None => return Err(err_code_str_box(LOCKED_LEASE_EXPRIED, "not locked for key")),
+            None => return result!(Code::LockedLeaseExpried, "not locked for key"),
         };
 
         let mut batch = WriteBatch::default();
@@ -110,7 +108,7 @@ impl HARepository {
         value.extend((current_millis() + ttl_mill).to_be_bytes().to_vec());
         value.extend(lease.as_bytes());
 
-        convert(batch.put(key.as_bytes(), value.as_slice()))?;
+        batch.put(key.as_bytes(), value.as_slice());
         self.do_write_batch(batch)
     }
 
@@ -122,16 +120,13 @@ impl HARepository {
         match self.db.get(key.as_bytes())? {
             Some(v) => {
                 if String::from_utf8_lossy(&v[8..]) != lease {
-                    return Err(err_code_str_box(
-                        LOCKED_LEASE_EXPRIED,
-                        "lease not locked for key",
-                    ));
+                    return result!(Code::LockedLeaseExpried, "lease not locked for key");
                 }
             }
-            None => return Err(err_code_str_box(LOCKED_LEASE_EXPRIED, "not locked for key")),
+            None => return result!(Code::LockedLeaseExpried, "not locked for key"),
         };
         let mut batch = WriteBatch::default();
-        convert(batch.delete(key))?;
+        batch.delete(key);
         self.do_write_batch(batch)
     }
 
@@ -140,15 +135,9 @@ impl HARepository {
         let key = key.as_str();
         let _lock = self.write_lock.write().unwrap();
         match self.do_get(key) {
-            Ok(_) => {
-                return Err(err_code_box(
-                    ALREADY_EXISTS,
-                    format!("the key:{} already exists", key),
-                ))
-            }
+            Ok(_) => return result!(Code::AlreadyExists, "the key:{} already exists", key),
             Err(e) => {
-                let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
+                if e.code() != Code::RocksDBNotFound {
                     return Err(e);
                 }
             }
@@ -160,6 +149,15 @@ impl HARepository {
         let key = value.make_key();
         let _lock = self.write_lock.read().unwrap();
         self.do_put_json(key.as_str(), value)
+    }
+
+    pub fn put_batch<T: Serialize + MakeKey>(&self, values: &Vec<T>) -> ASResult<()> {
+        let _lock = self.write_lock.read().unwrap();
+        let mut kvs: Vec<(String, &T)> = vec![];
+        for value in values {
+            kvs.push((value.make_key(), value));
+        }
+        self.do_put_jsons(kvs)
     }
 
     pub fn put_kv(&self, key: &str, value: &[u8]) -> ASResult<()> {
@@ -180,7 +178,7 @@ impl HARepository {
         let key = value.make_key();
         let _lock = self.write_lock.read().unwrap();
         let mut batch = WriteBatch::default();
-        convert(batch.delete(key.as_bytes()))?;
+        batch.delete(key.as_bytes());
         self.do_write_batch(batch)
     }
 
@@ -188,7 +186,7 @@ impl HARepository {
         let _lock = self.write_lock.read().unwrap();
         let mut batch = WriteBatch::default();
         for key in keys {
-            convert(batch.delete(key.as_bytes()))?;
+            batch.delete(key.as_bytes());
         }
         self.do_write_batch(batch)
     }
@@ -197,29 +195,43 @@ impl HARepository {
     fn do_put_json<T: Serialize>(&self, key: &str, value: &T) -> ASResult<()> {
         match serde_json::to_vec(value) {
             Ok(v) => self.do_put(key, v.as_slice()),
-            Err(e) => Err(err_box(format!("cast to json bytes err:{}", e.to_string()))),
+            Err(e) => result_def!("cast to json bytes err:{}", e.to_string()),
         }
+    }
+
+    /// do put json
+    fn do_put_jsons<T: Serialize>(&self, kvs: Vec<(String, &T)>) -> ASResult<()> {
+        let mut batch = WriteBatch::default();
+
+        for kv in kvs {
+            match serde_json::to_vec(kv.1) {
+                Ok(v) => batch.put(kv.0.as_bytes(), v.as_slice()),
+                Err(e) => return result_def!("cast to json bytes err:{}", e.to_string()),
+            }
+        }
+
+        self.do_write_batch(batch)
     }
 
     //do put with bytes
     fn do_put(&self, key: &str, value: &[u8]) -> ASResult<()> {
         let mut batch = WriteBatch::default();
-        convert(batch.put(key.as_bytes(), value))?;
+        batch.put(key.as_bytes(), value);
         self.do_write_batch(batch)
     }
 
     /// do get
     fn do_get(&self, key: &str) -> ASResult<Vec<u8>> {
+        if key.len() == 0 {
+            return result!(Code::ParamError, "key is empty");
+        }
+
         match self.db.get(key.as_bytes()) {
             Ok(ov) => match ov {
                 Some(v) => Ok(v),
-                None => Err(err_code_str_box(NOT_FOUND, "not found!")),
+                None => result!(Code::RocksDBNotFound, "key:[{}] not found!", key,),
             },
-            Err(e) => Err(err_box(format!(
-                "get key:{} has err:{}",
-                key,
-                e.to_string()
-            ))),
+            Err(e) => result_def!("get key:{} has err:{}", key, e.to_string()),
         }
     }
 
@@ -268,8 +280,7 @@ impl HARepository {
 
         let value = match self.do_get(key) {
             Err(e) => {
-                let e = cast_to_err(e);
-                if e.0 != NOT_FOUND {
+                if e.code() != Code::RocksDBNotFound {
                     return Err(e);
                 }
                 1

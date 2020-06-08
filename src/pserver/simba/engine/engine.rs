@@ -13,7 +13,10 @@
 // permissions and limitations under the License.
 use crate::util::{config, entity::*, error::ASResult};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering::SeqCst},
+    Arc,
+};
 
 pub trait Engine {
     fn flush(&self) -> ASResult<()>;
@@ -24,22 +27,19 @@ pub struct BaseEngine {
     pub conf: Arc<config::Config>,
     pub collection: Arc<Collection>,
     pub partition: Arc<Partition>,
+    pub stoped: AtomicBool,
 }
 
 impl BaseEngine {
-    pub fn new(base: &BaseEngine) -> BaseEngine {
-        BaseEngine {
-            conf: base.conf.clone(),
-            collection: base.collection.clone(),
-            partition: base.partition.clone(),
-        }
-    }
-
     pub fn base_path(&self) -> PathBuf {
         Path::new(&self.conf.ps.data)
             .join(Path::new(
                 format!("{}", self.partition.collection_id).as_str(),
             ))
             .join(Path::new(format!("{}", self.partition.id).as_str()))
+    }
+
+    pub fn runing(&self) -> bool {
+        !self.stoped.load(SeqCst)
     }
 }

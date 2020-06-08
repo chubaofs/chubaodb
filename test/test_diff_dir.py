@@ -2,11 +2,9 @@ import pytest
 import requests
 import json
 import random
+import config
 
-ROUTER = "11.3.146.195:80"
-PS1 = "11.3.146.195:9090" 
-PS2 = "11.3.146.232:9090"
-PATH = "/cfs/mnt/chubao_data/1/0/db"
+
 
 def test_create_collection():
     url = "http://" + ROUTER + "/command"

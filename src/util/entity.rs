@@ -14,25 +14,262 @@
 use crate::pserverpb::*;
 use crate::util::error::*;
 use crate::util::time::*;
+use crate::*;
+use async_graphql::{Enum, InputObject};
 use serde_derive::{Deserialize, Serialize};
+use serde_json::Value;
 
+#[InputObject]
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum FieldType {
-    UNKNOW = 0,
-    STRING = 1,
-    INTEGER = 2,
-    DOUBLE = 3,
-    TEXT = 4,
+pub struct IntField {
+    pub name: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
 }
 
+#[InputObject]
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Field {
-    pub name: Option<String>,
-    pub field_type: Option<String>,
-    pub array: Option<bool>,
-    pub index: Option<bool>,
-    pub store: Option<bool>,
-    pub internal_type: Option<FieldType>,
+pub struct FloatField {
+    pub name: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+}
+
+fn default_false() -> bool {
+    false
+}
+
+#[InputObject]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct StringField {
+    pub name: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+}
+
+#[InputObject]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TextField {
+    pub name: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+}
+
+#[Enum(desc = "computer method default is L2")]
+#[derive(Serialize, Deserialize, Clone, Debug, Copy)]
+pub enum MetricType {
+    L2 = 1,
+    InnerProduct = 2,
+}
+
+#[InputObject]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VectorField {
+    pub name: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+    //train when doc got the size, if size <=0 , not train
+    pub train_size: i32,
+    //dimension: dimension of the input vectors
+    pub dimension: i32,
+    // A constructor
+    pub description: String,
+    // the type of metric
+    pub metric_type: MetricType,
+}
+
+impl VectorField {
+    pub fn validate(&self, v: Option<Value>) -> ASResult<Vec<f32>> {
+        let none = v.is_none();
+        if none && self.none {
+            return Ok(Vec::default());
+        }
+
+        let value: Vec<f32> = serde_json::from_value(v.unwrap())?;
+
+        if value.len() == 0 && none {
+            return Ok(value);
+        }
+
+        if !self.array {
+            if value.len() != self.dimension as usize {
+                return result_def!(
+                    "the field:{} vector dimension expectd:{} , found:{}",
+                    self.name,
+                    self.dimension,
+                    value.len()
+                );
+            }
+        } else {
+            if value.len() % self.dimension as usize != 0 {
+                return result_def!(
+                    "the field:{} vector dimension expectd:{} * n  , found:{}  mod:{}",
+                    self.name,
+                    self.dimension,
+                    value.len(),
+                    value.len() % self.dimension as usize
+                );
+            }
+        }
+
+        return Ok(value);
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum Field {
+    int(IntField),
+    float(FloatField),
+    string(StringField),
+    text(TextField),
+    vector(VectorField),
+}
+
+impl Field {
+    pub fn is_vector(&self) -> bool {
+        matches!(*self, Field::vector(_))
+    }
+
+    pub fn vector(&self) -> ASResult<VectorField> {
+        match self {
+            Field::vector(f) => Ok(f.clone()),
+            _ => result!(
+                Code::FieldTypeErr,
+                "schma field:{:?} type is not vecotr",
+                self,
+            ),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Field::int(f) => f.name.as_str(),
+            Field::float(f) => f.name.as_str(),
+            Field::string(f) => f.name.as_str(),
+            Field::text(f) => f.name.as_str(),
+            Field::vector(f) => f.name.as_str(),
+        }
+    }
+
+    pub fn array(&self) -> bool {
+        match self {
+            Field::int(f) => f.array,
+            Field::float(f) => f.array,
+            Field::string(f) => f.array,
+            Field::text(f) => f.array,
+            Field::vector(f) => f.array,
+        }
+    }
+
+    pub fn none(&self) -> bool {
+        match self {
+            Field::int(f) => f.none,
+            Field::float(f) => f.none,
+            Field::string(f) => f.none,
+            Field::text(f) => f.none,
+            Field::vector(f) => f.none,
+        }
+    }
+
+    pub fn validate(&self, v: Option<&Value>) -> ASResult<()> {
+        if v.is_none() {
+            if self.none() {
+                return Ok(());
+            } else {
+                return result!(Code::ParamError, "field:{} can not none", self.name(),);
+            }
+        }
+
+        let v = v.unwrap();
+
+        if self.array() {
+            if !v.is_array() {
+                return result!(
+                    Code::ParamError,
+                    "field:{} expect array but found:{:?} ",
+                    self.name(),
+                    v,
+                );
+            } else {
+                for sv in v.as_array().unwrap() {
+                    self.validate_field(sv)?;
+                }
+            }
+        } else {
+            self.validate_field(v)?;
+        }
+        Ok(())
+    }
+
+    fn validate_field(&self, v: &Value) -> ASResult<()> {
+        match self {
+            Field::int(f) => {
+                if !v.is_i64() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect int but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
+            Field::float(f) => {
+                if !v.is_f64() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect float but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
+            Field::string(f) => {
+                if !v.is_string() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect string but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
+            Field::text(f) => {
+                if !v.is_string() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect text but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
+            Field::vector(_) => {
+                panic!("not vector field");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -43,27 +280,26 @@ pub enum CollectionStatus {
     WORKING = 3,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Collection {
-    pub id: Option<u32>,
-    pub name: Option<String>,
-    #[serde(default)]
-    pub fields: Vec<Field>,
-    pub partition_num: Option<u32>,
-    pub partitions: Option<Vec<u32>>,
-    pub slots: Option<Vec<u32>>,
-    pub status: Option<CollectionStatus>,
-    pub modify_time: Option<u64>,
+impl Default for CollectionStatus {
+    fn default() -> Self {
+        CollectionStatus::UNKNOW
+    }
 }
 
-impl Collection {
-    pub fn get_name(&self) -> &str {
-        self.name.as_ref().unwrap().as_str()
-    }
-
-    pub fn get_mut_fields(&mut self) -> &mut Vec<Field> {
-        self.fields.as_mut()
-    }
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct Collection {
+    pub id: u32,
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub partition_num: u32,
+    pub partition_replica_num: u32,
+    pub partitions: Vec<u32>,
+    pub slots: Vec<u32>,
+    pub status: CollectionStatus,
+    pub modify_time: u64,
+    pub vector_field_index: Vec<usize>,
+    pub scalar_field_index: Vec<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -72,6 +308,18 @@ pub struct Partition {
     pub collection_id: u32,
     pub leader: String,
     pub version: u64,
+    pub replicas: Vec<Replica>,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Replica {
+    pub node_id: u32,
+    pub replica_type: ReplicaType,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ReplicaType {
+    NORMAL = 0,  //normal type
+    LEARNER = 1, //learner type
 }
 
 impl Partition {
@@ -86,18 +334,21 @@ impl Partition {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PServer {
+    pub id: Option<u32>,
     pub addr: String,
     #[serde(default)]
     pub write_partitions: Vec<Partition>,
-    pub zone_id: u32,
+    #[serde(default)]
+    pub zone: String,
     #[serde(default = "current_millis")]
     pub modify_time: u64,
 }
 
 impl PServer {
-    pub fn new(zone_id: u32, addr: String) -> Self {
+    pub fn new(zone: String, id: Option<u32>, addr: String) -> Self {
         PServer {
-            zone_id: zone_id,
+            id: id,
+            zone: zone,
             write_partitions: Vec::default(),
             addr: addr,
             modify_time: 0,
@@ -107,33 +358,13 @@ impl PServer {
     pub fn get_addr(&self) -> &str {
         self.addr.as_str()
     }
-
-    pub fn get_zone_id(&self) -> u32 {
-        self.zone_id
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Zone {
-    pub id: Option<u32>,
-    pub name: Option<String>,
-}
-
-impl Zone {
-    pub fn get_id(&self) -> u32 {
-        self.id.unwrap()
-    }
-
-    pub fn get_name(&self) -> &str {
-        self.name.as_ref().unwrap().as_str()
-    }
 }
 
 pub fn merge_count_document_response(
     mut dist: CountDocumentResponse,
     src: CountDocumentResponse,
 ) -> CountDocumentResponse {
-    if src.code != SUCCESS as i32 {
+    if Code::from_i32(src.code) != Code::Success {
         dist.code = src.code;
     }
     dist.estimate_count += src.estimate_count;
@@ -146,11 +377,18 @@ pub fn merge_count_document_response(
     dist
 }
 
+pub fn msg_for_search_resp(dist: &SearchDocumentResponse) -> String {
+    match &dist.info {
+        Some(i) => i.message.clone(),
+        None => format!("not found info"),
+    }
+}
+
 pub fn merge_search_document_response(
     mut dist: SearchDocumentResponse,
     mut src: SearchDocumentResponse,
 ) -> SearchDocumentResponse {
-    if src.code != SUCCESS as i32 {
+    if src.code != Code::Success as i32 {
         dist.code = src.code;
     }
 
@@ -186,13 +424,6 @@ pub trait MakeKey {
     fn make_key(&self) -> String;
 }
 
-/// META_ZONES_{zone_id} = value: {Zone}
-impl MakeKey for Zone {
-    fn make_key(&self) -> String {
-        entity_key::zone(self.get_id())
-    }
-}
-
 /// META_PARTITIONS_{collection_id}_{partition_id} = value: {Partition}
 impl MakeKey for Partition {
     fn make_key(&self) -> String {
@@ -203,7 +434,7 @@ impl MakeKey for Partition {
 /// META_COLLECTIONS_{collection_id}
 impl MakeKey for Collection {
     fn make_key(&self) -> String {
-        entity_key::collection(self.id.unwrap())
+        entity_key::collection(self.id)
     }
 }
 
@@ -216,27 +447,24 @@ impl MakeKey for PServer {
 
 pub mod entity_key {
 
-    const PREFIX_ZONE: &str = "/META/ZONE";
     const PREFIX_PSERVER: &str = "/META/SERVER";
     const PREFIX_COLLECTION: &str = "/META/COLLECTION";
     const PREFIX_PARTITION: &str = "/META/PARTITION";
+    const PREFIX_PSERVER_ID: &str = "/META/SERVER_ID";
 
     pub const SEQ_COLLECTION: &str = "/META/SEQUENCE/COLLECTION";
     pub const SEQ_PARTITION: &str = "/META/SEQUENCE/PARTITION";
-
-    pub fn zone(id: u32) -> String {
-        format!("{}/{}", PREFIX_ZONE, id)
-    }
-
-    pub fn zone_prefix() -> String {
-        format!("{}/", PREFIX_ZONE)
-    }
+    pub const SEQ_PSERVER: &str = "/META/SEQUENCE/PSERVER";
 
     pub fn pserver(addr: &str) -> String {
         format!("{}/{}", PREFIX_PSERVER, addr)
     }
     pub fn pserver_prefix() -> String {
         format!("{}/", PREFIX_PSERVER)
+    }
+
+    pub fn pserver_id(server_id: u32) -> String {
+        format!("{}/{}", PREFIX_PSERVER_ID, server_id)
     }
 
     pub fn collection(id: u32) -> String {

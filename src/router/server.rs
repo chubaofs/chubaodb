@@ -14,8 +14,9 @@
 use crate::pserverpb::*;
 use crate::router::service::RouterService;
 use crate::util::{config, error::*};
+use crate::*;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
-use log::info;
+use log::{error, info};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -39,18 +40,14 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
             .data(arc_service.clone())
             .route("/", web::get().to(domain))
             .route("/get/{collection_name}/{id}", web::get().to(get))
-            .route(
-                "/overwrite/{collection_name}/{id}",
-                web::post().to(overwrite),
-            )
+            .route("/put/{collection_name}/{id}", web::post().to(put))
             .route("/update/{collection_name}/{id}", web::post().to(update))
             .route("/upsert/{collection_name}/{id}", web::post().to(upsert))
             .route("/create/{collection_name}/{id}", web::post().to(create))
             .route("/delete/{collection_name}/{id}", web::delete().to(delete))
-            .route("/search/{collection_names}", web::get().to(search))
+            .route("/search/{collection_names}", web::get().to(search_by_get))
+            .route("/search/{collection_names}", web::post().to(search_by_post))
             .route("/count/{collection_name}", web::get().to(count))
-            //command
-            .route("/command", web::post().to(command))
     })
     .bind(format!("0.0.0.0:{}", conf.router.http_port))?
     .run()
@@ -63,7 +60,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
 }
 
 async fn domain() -> HttpResponse {
-    HttpResponse::build(http_code(SUCCESS)).body(json!({
+    HttpResponse::build(Code::Success.http_code()).body(json!({
         "chubaodb":"router is runing",
         "version":config::VERSION,
         "git_version": config::GIT_VERSION,
@@ -74,20 +71,6 @@ async fn domain() -> HttpResponse {
 pub struct DocumentQuery {
     pub version: Option<i64>,
     pub sort_key: Option<String>,
-}
-
-//this api was deprecated
-//example : {"target":["127.0.0.1:9090"] , "method":"file_info" , "path":"./"}
-async fn command(rs: web::Data<Arc<RouterService>>, bytes: web::Bytes) -> HttpResponse {
-    match rs.command(bytes.to_vec()).await {
-        Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(s),
-        Err(e) => {
-            let e = cast_to_err(e);
-            HttpResponse::build(http_code(e.0))
-                .content_type("application/json")
-                .body(e.to_json())
-        }
-    }
 }
 
 async fn write(
@@ -121,13 +104,10 @@ async fn write(
         )
         .await
     {
-        Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(gr_to_json(s)),
-        Err(e) => {
-            let e = cast_to_err(e);
-            HttpResponse::build(http_code(e.0))
-                .content_type("application/json")
-                .body(e.to_json())
-        }
+        Ok(s) => HttpResponse::build(Code::Success.http_code()).json(gr_to_json(s)),
+        Err(e) => HttpResponse::build(e.code().http_code())
+            .content_type("application/json")
+            .body(e.to_json()),
     }
 }
 
@@ -147,7 +127,7 @@ async fn create(
     .await
 }
 
-async fn overwrite(
+async fn put(
     rs: web::Data<Arc<RouterService>>,
     req: HttpRequest,
     query: web::Query<DocumentQuery>,
@@ -158,7 +138,7 @@ async fn overwrite(
         req,
         Some(bytes),
         query.into_inner(),
-        WriteType::Overwrite as i32,
+        WriteType::Put as i32,
     )
     .await
 }
@@ -224,20 +204,24 @@ async fn get(
         )
         .await
     {
-        Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(doc_to_json(s)),
-        Err(e) => {
-            let e = cast_to_err(e);
-            HttpResponse::build(http_code(e.0))
-                .content_type("application/json")
-                .body(e.to_json())
-        }
+        Ok(s) => HttpResponse::build(Code::Success.http_code()).json(doc_to_json(s)),
+        Err(e) => HttpResponse::build(e.code().http_code())
+            .content_type("application/json")
+            .body(e.to_json()),
     }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Query {
-    pub def_fields: Option<String>,
+struct TempVectorQuery {
+    pub field: Option<String>,
+    pub vector: Vec<f32>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Query {
     pub query: Option<String>,
+    pub def_fields: Option<String>,
+    pub vector_query: Option<TempVectorQuery>,
     pub size: Option<u32>,
 }
 
@@ -250,40 +234,62 @@ async fn count(rs: web::Data<Arc<RouterService>>, req: HttpRequest) -> HttpRespo
         .unwrap();
 
     match rs.count(collection_name).await {
-        Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(json!({
-            "code":s.code,
-            "estimate_count":s.estimate_count,
-            "index_count":s.index_count,
-            "message":s.message
-        })),
-        Err(e) => {
-            let e = cast_to_err(e);
-            HttpResponse::build(http_code(e.0))
-                .content_type("application/json")
-                .body(e.to_json())
+        Ok(s) => {
+            HttpResponse::build(Code::Success.http_code()).json(serde_json::to_value(&s).unwrap())
         }
+        Err(e) => HttpResponse::build(e.code().http_code())
+            .content_type("application/json")
+            .body(e.to_json()),
     }
 }
 
-async fn search(
+async fn search_by_post(
     rs: web::Data<Arc<RouterService>>,
     req: HttpRequest,
-    query: web::Query<Query>,
+    info: web::Bytes,
 ) -> HttpResponse {
-    let mut collection_names = Vec::new();
-
-    for n in req
+    let names = req
         .match_info()
         .get("collection_names")
         .unwrap()
         .parse::<String>()
+        .unwrap();
+
+    let query: Query = match serde_json::from_slice(&info) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("query parse has err:{:?}", e);
+            return HttpResponse::build(Code::ParamError.http_code())
+                .body(err_def!("query has err:{:?}", e).to_json());
+        }
+    };
+
+    return _search(rs, names, query).await;
+}
+
+async fn search_by_get(
+    rs: web::Data<Arc<RouterService>>,
+    req: HttpRequest,
+    query: web::Query<Query>,
+) -> HttpResponse {
+    let names = req
+        .match_info()
+        .get("collection_names")
         .unwrap()
-        .split(",")
-    {
-        collection_names.push(n.to_string());
-    }
+        .parse::<String>()
+        .unwrap();
 
     let query = query.into_inner();
+
+    return _search(rs, names, query).await;
+}
+
+async fn _search(rs: web::Data<Arc<RouterService>>, names: String, query: Query) -> HttpResponse {
+    let mut collection_names = Vec::new();
+
+    for n in names.split(",") {
+        collection_names.push(n.to_string());
+    }
 
     let mut def_fields = Vec::new();
 
@@ -296,22 +302,35 @@ async fn search(
         None => {}
     };
 
+    let vq = match query.vector_query {
+        Some(tvq) => Some(VectorQuery {
+            field: match tvq.field {
+                Some(field) => field,
+                None => {
+                    return HttpResponse::build(Code::ParamError.http_code())
+                        .content_type("application/json")
+                        .body(err!(Code::ParamError, "vector query not sett field").to_json());
+                }
+            },
+            vector: tvq.vector,
+        }),
+        None => None,
+    };
+
     match rs
         .search(
             collection_names,
             def_fields,
             query.query.unwrap_or(String::from("*")),
+            vq,
             query.size.unwrap_or(20),
         )
         .await
     {
-        Ok(s) => HttpResponse::build(http_code(SUCCESS)).json(search_to_json(s)),
-        Err(e) => {
-            let e = cast_to_err(e);
-            return HttpResponse::build(http_code(e.0))
-                .content_type("application/json")
-                .body(e.to_json());
-        }
+        Ok(s) => HttpResponse::build(Code::Success.http_code()).json(search_to_json(s)),
+        Err(e) => HttpResponse::build(e.code().http_code())
+            .content_type("application/json")
+            .body(e.to_json()),
     }
 }
 
@@ -327,7 +346,7 @@ fn search_to_json(sdr: SearchDocumentResponse) -> serde_json::value::Value {
             Ok(d) => d,
             Err(e) => {
                 return json!({
-                    "code": INTERNAL_ERR ,
+                    "code": Code::InternalErr as i32 ,
                     "info": {
                         "message":format!("document decoding failed:{}", e.to_string())
                     },
@@ -339,7 +358,7 @@ fn search_to_json(sdr: SearchDocumentResponse) -> serde_json::value::Value {
             Ok(v) => v,
             Err(e) => {
                 return json!({
-                    "code": INTERNAL_ERR ,
+                    "code": Code::InternalErr as i32,
                     "message": format!("source decoding failed:{}", e.to_string()),
                 });
             }
@@ -381,7 +400,7 @@ fn doc_to_json(dr: DocumentResponse) -> serde_json::value::Value {
         Ok(d) => d,
         Err(e) => {
             return json!({
-                "code": INTERNAL_ERR ,
+                "code": Code::InternalErr as i32 ,
                 "message": format!("document decoding failed:{}", e.to_string()),
             });
         }
@@ -391,7 +410,7 @@ fn doc_to_json(dr: DocumentResponse) -> serde_json::value::Value {
         Ok(v) => v,
         Err(e) => {
             return json!({
-                "code": INTERNAL_ERR ,
+                "code": Code::InternalErr as i32 ,
                 "message": format!("source decoding failed:{}", e.to_string()),
             });
         }

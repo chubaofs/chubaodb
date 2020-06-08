@@ -11,7 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-
+use std::path::Path;
 fn main() {
-    tonic_build::compile_protos("proto/pserverpb.proto").unwrap();
+    let proto = "proto/pserverpb.proto";
+
+    let proto_path: &Path = proto.as_ref();
+
+    // directory the main .proto file resides in
+    let proto_dir = proto_path
+        .parent()
+        .expect("proto file should reside in a directory");
+
+    tonic_build::configure()
+        .type_attribute(".", "#[derive(serde_derive::Serialize)]")
+        .compile(&[proto_path], &[proto_dir])
+        .unwrap();
 }

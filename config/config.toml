@@ -1,17 +1,14 @@
 [global]
 # the name will validate join cluster by same name
-name = "anyindex"
+name = "chubaodb"
 # your server ip for connect, you can use -i in rags to set it
 ip = "127.0.0.1"
 # log path , If you are in a production environment, You'd better set absolute paths
 log = "logs/"
-# this config for all start model
-log_level = "debug"
-# size for max log file size default is 128 MB
-log_limit_bytes = 134217728
-# the log file num  , default is 100
-log_limit_bytes = 100
-
+# default log type for any model
+log_level = "info"
+# Whether to use distributed storage. If it's true, there's only one
+shared_disk = false
 
 [router]
 # port for server
@@ -19,13 +16,20 @@ http_port = 8080
 
 [ps]
 #set zone num, default is 0
-zone_id = 0
+zone = "default"
 # you data save to disk path ,If you are in a production environment, You'd better set absolute paths
 data = "data/"
 # port for server
 rpc_port = 9090
-# simba to flush data how long sleep 
+# how often to refresh the index
 flush_sleep_sec = 3
+    [ps.raft]
+        use_memoray_storage = true
+        storage_path = "data/raft/"
+    [ps.rs]
+        tick_interval = 100
+        election_tick = 5
+        transport_inprocess_use = true
 
 [[masters]]
 # master ip for service

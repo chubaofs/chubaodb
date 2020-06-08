@@ -12,6 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::util::error::*;
+use crate::*;
 use std::sync::Mutex;
 pub struct Latch {
     locks: Vec<Mutex<usize>>,
@@ -36,7 +37,7 @@ impl Latch {
     pub fn latch<T>(&self, slot: u32, f: impl FnOnce() -> ASResult<T>) -> ASResult<T> {
         match self.locks[slot as usize % self.size].lock() {
             Ok(_) => f(),
-            Err(e) => Err(err_box(format!("get latch lock has err:{}", e.to_string()))),
+            Err(e) => result_def!("get latch lock has err:{}", e),
         }
     }
 }

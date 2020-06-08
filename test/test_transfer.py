@@ -5,17 +5,17 @@ import pytest
 import requests
 import json
 import random
-
-MASTER = "11.3.146.195:443"
-ROUTER = "11.3.146.195:80"
+import time
+from config import *
 
 
 def test_del_collection():
+
     url = "http://" + MASTER + "/collection/delete/t1"
     response = requests.delete(url)
     print("collection_delete---\n" + response.text)
 
-    assert response.status_code == 200 or response.status_code == 509
+    assert response.status_code == 200 or response.status_code == 503
 
 
 def test_create_collection():
@@ -88,9 +88,9 @@ def test_transfer():
     assert response.status_code == 200
 
 
-def test_overwrite():
+def test_put():
     id = random.randint(1, 100000000)
-    response = requests.post("http://" + ROUTER + "/overwrite/t1/"+str(id), data=json.dumps({
+    response = requests.post("http://" + ROUTER + "/put/t1/"+str(id), data=json.dumps({
         "name": "ansj",
         "age": 35,
         "content": "hello tig"
@@ -104,4 +104,4 @@ def test_overwrite():
 def test_multiple():
     for i in range(10):
         test_transfer()
-        test_overwrite()
+        test_put()

@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
+use crate::util::net::MyIp;
 use git_version::git_version;
 use log::{info, LevelFilter};
 use log4rs::{
@@ -54,6 +55,7 @@ pub struct Global {
     pub log_limit_bytes: usize,
     #[serde(default = "default_log_file_count")]
     pub log_file_count: usize,
+    pub shared_disk: bool,
 }
 
 fn default_log_limit_bytes() -> usize {
@@ -68,13 +70,32 @@ fn default_log_file_count() -> usize {
 pub struct Router {
     pub http_port: u16,
 }
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct PS {
-    pub zone_id: u32,
+    // id value not need set in config, It will be assigned by the master
+    pub id: Option<u64>,
+    pub zone: String,
     pub data: String,
     pub rpc_port: u16,
     pub flush_sleep_sec: Option<u64>,
+    pub raft: RaftConf,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RaftConf {
+    pub heartbeat_port: u16,
+    pub replicate_port: u16,
+    // how size of num for memory
+    pub log_max_num: usize,
+    // how size of num for memory
+    pub log_min_num: usize,
+    // how size of num for memory
+    pub log_file_size_mb: u64,
+    //Three  without a heartbeat , follower to begin consecutive elections
+    pub heartbeate_ms: u64,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Master {
     pub ip: String,
@@ -87,16 +108,29 @@ pub struct Master {
 impl Config {
     //init once for starup
     fn init(&mut self) {
-        for m in self.masters.iter_mut() {
-            if m.ip.as_str() == self.global.ip.as_str() {
-                m.is_self = true;
+        if self.global.ip == "" {
+            let my = MyIp::instance().unwrap();
+            for m in self.masters.iter_mut() {
+                if my.is_my_ip(m.ip.as_str()) {
+                    m.is_self = true;
+                    break;
+                }
+            }
+        } else {
+            for m in self.masters.iter_mut() {
+                if m.ip.as_str() == self.global.ip.as_str() {
+                    m.is_self = true;
+                    break;
+                }
             }
         }
 
         // init log in
-
         let level = match self.global.log_level.to_uppercase().as_str() {
-            "DEBUG" => LevelFilter::Debug,
+            "DEBUG" => {
+                std::env::set_var("RUST_LOG", "actix_web=info"); //FIXME: not worked
+                LevelFilter::Debug
+            }
             "INFO" => LevelFilter::Info,
             "WARN" => LevelFilter::Warn,
             "TRACE" => LevelFilter::Trace,
@@ -179,18 +213,28 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
     if conf_path == "default" {
         return Config {
             global: Global {
-                name: String::from("anyindex"),
+                name: String::from("chubaodb"),
                 ip: String::from("127.0.0.1"),
                 log: String::from("log/"),
-                log_level: String::from("debug"),
+                log_level: String::from("info"),
                 log_limit_bytes: default_log_limit_bytes(),
                 log_file_count: default_log_file_count(),
+                shared_disk: true,
             },
             ps: PS {
-                zone_id: 0,
-                data: String::from("data/"),
+                id: None,
+                zone: String::from("default"),
+                data: String::from("data/ps"),
                 rpc_port: 9090,
                 flush_sleep_sec: Some(3),
+                raft: RaftConf {
+                    heartbeat_port: 12130,
+                    replicate_port: 12131,
+                    log_max_num: 20000,
+                    log_min_num: 10000,
+                    log_file_size_mb: 32,
+                    heartbeate_ms: 500,
+                },
             },
             router: Router { http_port: 8080 },
             masters: vec![Master {

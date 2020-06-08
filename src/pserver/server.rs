@@ -16,6 +16,7 @@ use crate::pserverpb::{
     rpc_server::{Rpc, RpcServer},
     *,
 };
+use crate::util::entity::*;
 use crate::util::{config, error::*};
 use log::{error, info};
 use std::error::Error;
@@ -48,13 +49,15 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), 
 
     let conf = Arc::new(config);
 
-    let ps = PartitionService::new(conf.clone());
+    let mut ps = PartitionService::new(conf.clone());
 
     let now = time::SystemTime::now();
+
     while let Err(err) = ps.init().await {
         error!("partition init has err:{:?} it will try again!", err);
         std::thread::sleep(time::Duration::from_secs(1));
     }
+
     info!(
         "init pserver OK use time:{:?}",
         time::SystemTime::now().duration_since(now)
@@ -77,11 +80,11 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), 
 }
 
 pub struct RPCService {
-    service: PartitionService,
+    service: Arc<PartitionService>,
 }
 
 impl RPCService {
-    fn new(ps: PartitionService) -> Self {
+    fn new(ps: Arc<PartitionService>) -> Self {
         RPCService { service: ps }
     }
 }
@@ -94,13 +97,7 @@ impl Rpc for RPCService {
     ) -> Result<Response<GeneralResponse>, Status> {
         let result = match self.service.write(request.into_inner()).await {
             Ok(gr) => gr,
-            Err(e) => {
-                let e = cast_to_err(e);
-                GeneralResponse {
-                    code: e.0 as i32,
-                    message: format!("write document err:{}", e.1),
-                }
-            }
+            Err(e) => e.into(),
         };
 
         Ok(Response::new(result))
@@ -112,14 +109,7 @@ impl Rpc for RPCService {
     ) -> Result<Response<DocumentResponse>, Status> {
         let result = match self.service.get(request.into_inner()) {
             Ok(gr) => gr,
-            Err(e) => {
-                let e = cast_to_err(e);
-                DocumentResponse {
-                    code: e.0 as i32,
-                    message: format!("get document err:{}", e.1),
-                    doc: Vec::default(),
-                }
-            }
+            Err(e) => e.into(),
         };
         Ok(Response::new(result))
     }
@@ -130,19 +120,7 @@ impl Rpc for RPCService {
     ) -> Result<Response<SearchDocumentResponse>, Status> {
         let result = match self.service.search(request.into_inner()).await {
             Ok(gr) => gr,
-            Err(e) => {
-                let e = cast_to_err(e);
-                SearchDocumentResponse {
-                    code: e.0 as i32,
-                    total: 0,
-                    hits: vec![],
-                    info: Some(SearchInfo {
-                        error: 1,
-                        success: 0,
-                        message: format!("search document err:{}", e.1),
-                    }),
-                }
-            }
+            Err(e) => e.into(),
         };
         Ok(Response::new(result))
     }
@@ -152,15 +130,8 @@ impl Rpc for RPCService {
         request: Request<CountDocumentRequest>,
     ) -> Result<Response<CountDocumentResponse>, Status> {
         let result = match self.service.count(request.into_inner()).await {
-            Ok(gr) => gr,
-            Err(e) => {
-                let e = cast_to_err(e);
-                CountDocumentResponse {
-                    code: e.0 as i32,
-                    message: format!("search document err:{}", e.1),
-                    ..Default::default()
-                }
-            }
+            Ok(v) => v,
+            Err(e) => e.into(),
         };
         Ok(Response::new(result))
     }
@@ -169,15 +140,9 @@ impl Rpc for RPCService {
         &self,
         request: Request<GeneralRequest>,
     ) -> Result<Response<GeneralResponse>, Status> {
-        let result = match self.service.status(request.into_inner()) {
-            Ok(gr) => gr,
-            Err(e) => {
-                let e = cast_to_err(e);
-                GeneralResponse {
-                    code: e.0 as i32,
-                    message: format!("status err:{}", e.1),
-                }
-            }
+        let result = match self.service.status(request.into_inner()).into() {
+            Ok(v) => v,
+            Err(e) => e.into(),
         };
         Ok(Response::new(result))
     }
@@ -189,41 +154,34 @@ impl Rpc for RPCService {
         let req = request.into_inner();
         info!("Start server load_or_create_partition");
 
-        let mut result = match self
+        let mut replicas: Vec<Replica> = vec![];
+        for rep in req.replicas {
+            let mut replica_type: ReplicaType = ReplicaType::NORMAL;
+            if rep.replica_type == 1 {
+                replica_type = ReplicaType::LEARNER;
+            }
+            replicas.push(Replica {
+                node_id: rep.node,
+                replica_type: replica_type,
+            });
+        }
+        let result = match self
             .service
             .init_partition(
                 req.collection_id,
                 req.partition_id,
+                replicas,
                 req.readonly,
                 req.version,
             )
             .await
         {
-            Ok(_) => GeneralResponse {
-                code: SUCCESS as i32,
-                message: String::from("success"),
-            },
-            Err(e) => {
-                let e = cast_to_err(e);
-                GeneralResponse {
-                    code: e.0 as i32,
-                    message: format!(
-                        "load_or_create partiiton in:{} has err:{}",
-                        self.service.conf.global.ip, e.1
-                    ),
-                }
-            }
+            Ok(_) => make_general_success(),
+            Err(e) => e.into(),
         };
 
         if let Err(e) = self.service.take_heartbeat().await {
-            let e = cast_to_err(e);
-            result = GeneralResponse {
-                code: e.0 as i32,
-                message: format!(
-                    "load_or_create partiiton in:{} has err:{}",
-                    self.service.conf.global.ip, e.1
-                ),
-            };
+            return Ok(Response::new(e.into()));
         }
 
         Ok(Response::new(result))
@@ -233,52 +191,22 @@ impl Rpc for RPCService {
         &self,
         request: Request<PartitionRequest>,
     ) -> Result<Response<GeneralResponse>, Status> {
-        let result = match self.service.offload_partition(request.into_inner()) {
-            Err(e) => {
-                let e = cast_to_err(e);
-                GeneralResponse {
-                    code: e.0 as i32,
-                    message: format!(
-                        "offload partiiton in:{} has err:{}",
-                        self.service.conf.global.ip, e.1
-                    ),
-                }
-            }
-            Ok(rep) => rep,
+        if let Err(e) = self.service.offload_partition(request.into_inner()) {
+            return Ok(Response::new(e.into()));
         };
 
-        if let Err(e) = self.service.take_heartbeat().await {
-            let e = cast_to_err(e);
-            return Ok(Response::new(GeneralResponse {
-                code: e.0 as i32,
-                message: format!(
-                    "offload partiiton in:{} has err:{}",
-                    self.service.conf.global.ip, e.1
-                ),
-            }));
+        let rep = match self.service.take_heartbeat().await {
+            Ok(_) => make_general_success(),
+            Err(e) => e.into(),
         };
 
-        Ok(Response::new(result))
+        Ok(Response::new(rep))
     }
+}
 
-    async fn command(
-        &self,
-        request: Request<CommandRequest>,
-    ) -> Result<Response<CommandResponse>, Status> {
-        match self.service.command(request.into_inner()) {
-            Ok(b) => Ok(Response::new(CommandResponse {
-                code: SUCCESS as i32,
-                message: String::default(),
-                body: b,
-            })),
-            Err(e) => {
-                let e = cast_to_err(e);
-                Ok(Response::new(CommandResponse {
-                    code: e.0 as i32,
-                    message: e.1,
-                    body: vec![],
-                }))
-            }
-        }
+fn make_general_success() -> GeneralResponse {
+    GeneralResponse {
+        code: Code::Success as i32,
+        message: String::from("success"),
     }
 }

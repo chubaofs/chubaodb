@@ -13,6 +13,7 @@
 // permissions and limitations under the License.
 use crate::pserverpb::{rpc_client::RpcClient, *};
 use crate::util::error::*;
+use crate::*;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Request;
 #[derive(Default)]
@@ -43,18 +44,8 @@ impl PartitionClient {
         mut rpc_client: RpcClient<Channel>,
         req: WriteDocumentRequest,
     ) -> ASResult<GeneralResponse> {
-        match rpc_client.write(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+        let resp = convert(rpc_client.write(Request::new(req)).await)?.into_inner();
+        result_obj_code!(resp)
     }
 
     pub async fn get(
@@ -62,18 +53,8 @@ impl PartitionClient {
         mut rpc_client: RpcClient<Channel>,
         req: GetDocumentRequest,
     ) -> ASResult<DocumentResponse> {
-        match rpc_client.get(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+        let resp = convert(rpc_client.get(Request::new(req)).await)?.into_inner();
+        result_obj_code!(resp)
     }
 }
 
@@ -81,34 +62,8 @@ impl PartitionClient {
 impl PartitionClient {
     pub async fn status(&self, req: GeneralRequest) -> ASResult<GeneralResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client.status(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
-    }
-
-    pub async fn command(&self, req: CommandRequest) -> ASResult<CommandResponse> {
-        let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client.command(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+        let resp = rpc_client.status(Request::new(req)).await?.into_inner();
+        result_obj_code!(resp)
     }
 
     pub async fn load_or_create_partition(
@@ -116,35 +71,21 @@ impl PartitionClient {
         req: PartitionRequest,
     ) -> ASResult<GeneralResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client.load_partition(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+        let resp = rpc_client
+            .load_partition(Request::new(req))
+            .await?
+            .into_inner();
+        result_obj_code!(resp)
     }
 
     //offload partition , if partition not exist it not return err
     pub async fn offload_partition(&self, req: PartitionRequest) -> ASResult<GeneralResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client.offload_partition(Request::new(req)).await {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+        let resp = rpc_client
+            .offload_partition(Request::new(req))
+            .await?
+            .into_inner();
+        result_obj_code!(resp)
     }
 }
 
@@ -166,42 +107,34 @@ impl MultiplePartitionClient {
         self,
         query: String,
         def_fields: Vec<String>,
+        vector_query: Option<VectorQuery>,
         size: u32,
     ) -> ASResult<SearchDocumentResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client
+
+        let resp = rpc_client
             .search(Request::new(SearchDocumentRequest {
                 cpids: self.collection_partition_ids,
                 query: query,
                 def_fields: def_fields,
+                vector_query: vector_query,
                 size: size,
             }))
-            .await
-        {
-            Ok(resp) => Ok(resp.into_inner()),
-            Err(e) => Err(err_str_box(e.message())),
-        }
+            .await?;
+
+        Ok(resp.into_inner())
     }
 
     pub async fn count(&self) -> ASResult<CountDocumentResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
-        match rpc_client
+        let resp = rpc_client
             .count(Request::new(CountDocumentRequest {
                 cpids: self.collection_partition_ids.clone(),
             }))
-            .await
-        {
-            Ok(resp) => {
-                let resp = resp.into_inner();
-                let code = resp.code as u16;
-                if code != SUCCESS {
-                    Err(err_code_box(code, resp.message))
-                } else {
-                    Ok(resp)
-                }
-            }
-            Err(e) => Err(err_str_box(e.message())),
-        }
+            .await?
+            .into_inner();
+
+        result_obj_code!(resp)
     }
 
     fn addr(&self) -> String {
