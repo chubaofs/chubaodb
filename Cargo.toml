@@ -25,7 +25,7 @@ async-graphql = "1.16.6"
 async-graphql-actix-web = "1.16.6"
 actix-rt = "1.1.1"
 http = "0.2.1"
-tonic = { version = "0.2.1", features = ["tls"] }
+tonic = { version = "0.3.0", features = ["tls"] }
 async-std = { version = "1.6.2", features = ["default", "unstable"]}
 prost = "0.6.1"
 serde = { version = "1.0.114" }
@@ -45,7 +45,7 @@ num_enum = "0.5.0"
 faiss4rs = {version = "1.6.307" , optional = true}
 
 [build-dependencies]
-tonic-build = "0.2.0"
+tonic-build = "0.3.0"
 
 
 [features]
