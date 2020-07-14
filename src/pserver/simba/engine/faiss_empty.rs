@@ -15,6 +15,7 @@ pub enum IndexStatus {
     Stoped,
 }
 
+// this struct for to use without faiss example  window or user not need vector search
 pub struct Faiss {
     _db: Arc<RocksDB>,
     base: Arc<BaseEngine>,
@@ -47,7 +48,7 @@ impl Faiss {
 
     pub fn search(
         &self,
-        _sdreq: Arc<SearchDocumentRequest>,
+        _sdreq: Arc<QueryRequest>,
         _bitmap: Option<RoaringBitmap>,
         _total: u64,
     ) -> ASResult<SearchDocumentResponse> {

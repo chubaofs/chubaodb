@@ -13,18 +13,22 @@
 // permissions and limitations under the License.
 use crate::util::error::*;
 use crate::*;
+use async_std::future;
 use log::info;
 use std::time::Duration;
 
 pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, m_timeout: u64) -> ASResult<V> {
     info!("send get for url:{}", url);
 
-    let mut resp = convert(surf::get(url).await)?;
+    let mut resp = match future::timeout(Duration::from_millis(m_timeout), surf::get(url)).await {
+        Err(e) => return result!(Code::Timeout, e.to_string()),
+        Ok(resp) => conver(resp)?,
+    };
 
     let http_code = resp.status().as_u16();
     if http_code != 200 {
         //try genererr
-        let text = convert(resp.body_string().await)?;
+        let text = conver(resp.body_string().await)?;
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
             if let Some(code) = value.get("code") {
                 if let Some(message) = value.get("message") {
@@ -45,12 +49,21 @@ where
     V: serde::de::DeserializeOwned,
 {
     info!("send post for url:{}", url);
-    let mut resp = convert(surf::post(url).body_json(&obj).unwrap().await)?;
+
+    let mut resp = match future::timeout(
+        Duration::from_millis(m_timeout),
+        surf::post(url).body_json(&obj).unwrap(),
+    )
+    .await
+    {
+        Err(e) => return result!(Code::Timeout, e.to_string()),
+        Ok(resp) => conver(resp)?,
+    };
 
     let http_code = resp.status().as_u16();
     if http_code != 200 {
         //try genererr
-        let text = convert(resp.body_string().await)?;
+        let text = conver(resp.body_string().await)?;
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
             if let Some(code) = value.get("code") {
                 if let Some(message) = value.get("message") {
@@ -61,7 +74,7 @@ where
         return result!(http_code as i32, text);
     }
 
-    Ok(convert(resp.body_json::<V>().await)?)
+    Ok(conver(resp.body_json::<V>().await)?)
 }
 
 // fn client_tout(timeout: u64) -> reqwest::Client {

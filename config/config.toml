@@ -2,11 +2,15 @@
 # the name will validate join cluster by same name
 name = "chubaodb"
 # your server ip for connect, you can use -i in rags to set it
-ip = "127.0.0.1"
+# ip = "127.0.0.1"
 # log path , If you are in a production environment, You'd better set absolute paths
 log = "logs/"
 # default log type for any model
 log_level = "info"
+# log file size for rolling
+log_limit_bytes = 128000000
+# number of reserved log files
+log_file_count = 10
 # Whether to use distributed storage. If it's true, there's only one
 shared_disk = false
 
@@ -24,12 +28,17 @@ rpc_port = 9090
 # how often to refresh the index
 flush_sleep_sec = 3
     [ps.raft]
-        use_memoray_storage = true
-        storage_path = "data/raft/"
-    [ps.rs]
-        tick_interval = 100
-        election_tick = 5
-        transport_inprocess_use = true
+        heartbeat_port = 10030
+        replicate_port = 10031
+        # how size of num for memory
+        log_max_num = 200000
+        # how size of num for memory
+        log_min_num = 100000
+        # how size of num for memory
+        log_file_size_mb = 128
+        # Three  without a heartbeat , follower to begin consecutive elections
+        heartbeate_ms = 500
+    
 
 [[masters]]
 # master ip for service

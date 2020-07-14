@@ -77,7 +77,7 @@ impl HARepository {
         let mut write_options = WriteOptions::default();
         write_options.disable_wal(false);
         write_options.set_sync(true);
-        convert(self.db.write_opt(batch, &write_options))?;
+        conver(self.db.write_opt(batch, &write_options))?;
 
         Ok(lease)
     }
@@ -167,7 +167,7 @@ impl HARepository {
 
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> ASResult<T> {
         let value = self.do_get(key)?;
-        convert(serde_json::from_slice(value.as_slice()))
+        conver(serde_json::from_slice(value.as_slice()))
     }
 
     pub fn get_kv(&self, key: &str) -> ASResult<Vec<u8>> {
@@ -269,7 +269,7 @@ impl HARepository {
         let mut write_options = WriteOptions::default();
         write_options.disable_wal(false);
         write_options.set_sync(true);
-        convert(self.db.write_opt(batch, &write_options))
+        conver(self.db.write_opt(batch, &write_options))
     }
 
     pub fn increase_id(&self, key: &str) -> ASResult<u32> {

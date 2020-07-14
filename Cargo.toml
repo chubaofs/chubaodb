@@ -13,39 +13,41 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-log = "0.4"
+log = "0.4.8"
 log4rs = "0.12.0"
 clap = "2.33.1"
-chrono = "0.4"
+chrono = "0.4.13"
 backtrace = "0.3"
 toml = "0.5.6"
-actix-web = "2"
-async-trait = "0.1.33"
-async-graphql = "1.14.19"
-async-graphql-actix-web = "1.14.14"
-actix-rt = "1"
-http = "0.2"
+actix-web = "2.0.0"
+async-trait = "0.1.36"
+async-graphql = "1.16.6"
+async-graphql-actix-web = "1.16.6"
+actix-rt = "1.1.1"
+http = "0.2.1"
 tonic = { version = "0.2.1", features = ["tls"] }
-async-std = { version = "1.6.0", features = ["default","unstable"]}
-prost = "0.6"
-serde = { version = "1.0" }
-serde_derive = "1.0.111"
-serde_json = "1.0"
-base64 = "0.12.1"
+async-std = { version = "1.6.2", features = ["default", "unstable"]}
+prost = "0.6.1"
+serde = { version = "1.0.114" }
+serde_derive = "1.0.114"
+serde_json = "1.0.56"
+base64 = "0.12.3"
 surf = "1.0.3"
 git-version = "0.3.4"
 uuid = { version = "0.8", features = ["v4"] }
 itertools = "0.9.0"
 rocksdb = { version = "0.14.0", features = ["lz4"] }
 tantivy = "0.12.0"
-raft4rs = { path = "../rust-raft" }
+raft4rs = "0.1.1"
 rand = "0.7.3"
 roaring = "0.6.0"
 num_enum = "0.5.0"
-tokio = { version = "0.2.21", features = ["full"]}
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-faiss4rs = "1.6.307"
+faiss4rs = {version = "1.6.307" , optional = true}
 
 [build-dependencies]
 tonic-build = "0.2.0"
+
+
+[features]
+default = []
+vector = ["faiss4rs"]

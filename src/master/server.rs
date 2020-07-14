@@ -185,8 +185,8 @@ async fn del_collection(rs: web::Data<Arc<MasterService>>, req: HttpRequest) -> 
     info!("prepare to delete collection by name {}", collection_name);
     match rs.del_collection(collection_name.as_str()).await {
         Ok(s) => success_response(json!({
-            "collection":collection_name,
-            "delete_num":s
+            "success":true,
+            "collection":s
         })),
         Err(e) => {
             error!(

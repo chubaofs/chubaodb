@@ -57,14 +57,49 @@ impl RouterService {
         query: String,
         vector_query: Option<VectorQuery>,
         size: u32,
+        sort: Vec<Order>,
     ) -> ASResult<SearchDocumentResponse> {
         self.ps_client
             .search(
                 collection_names[0].as_str(),
-                query,
-                def_fields,
-                vector_query,
-                size,
+                QueryRequest {
+                    cpids: vec![],
+                    query: query,
+                    def_fields: def_fields,
+                    vector_query: vector_query,
+                    size: size,
+                    sort: sort,
+                    fun: Default::default(),
+                    group: Default::default(),
+                },
+            )
+            .await
+    }
+
+    pub async fn agg(
+        &self,
+        collection_names: Vec<String>,
+        def_fields: Vec<String>,
+        query: String,
+        vector_query: Option<VectorQuery>,
+        size: u32,
+        group: String,
+        fun: String,
+        sort: Vec<Order>,
+    ) -> ASResult<AggregationResponse> {
+        self.ps_client
+            .agg(
+                collection_names[0].as_str(),
+                QueryRequest {
+                    cpids: vec![],
+                    query,
+                    def_fields,
+                    vector_query,
+                    size,
+                    group,
+                    fun,
+                    sort,
+                },
             )
             .await
     }

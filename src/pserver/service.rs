@@ -13,10 +13,13 @@
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
 use crate::pserver::raft::*;
+use crate::pserver::simba::aggregation;
+use crate::pserver::simba::engine::tantivy::sort::FieldScore;
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use crate::*;
+use async_std::{sync::channel, task};
 use log::{error, info};
 use raft4rs::{
     entity::{Decode, Entry},
@@ -28,10 +31,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering::SeqCst},
-    mpsc, Arc, Mutex, RwLock,
+    Arc, Mutex, RwLock,
 };
-use std::thread;
-
 enum Store {
     Leader {
         partition: Arc<Partition>,
@@ -203,6 +204,7 @@ impl PartitionService {
                 .unwrap()
                 .create_raft(
                     coding::merge_u32(collection.id, partition.id),
+                    0,
                     replicas[0],
                     &replicas,
                     NodeStateMachine::new(
@@ -335,24 +337,24 @@ impl PartitionService {
         self.take_heartbeat().await
     }
 
-    async fn init_simba_by_raft(&self, simba: &Arc<Simba>, raft: &Arc<Raft>) -> ASResult<()> {
-        if let Err(e) = raft
-            .store
-            .iter(simba.get_raft_index() + 1, |body| -> RaftResult<bool> {
-                match Entry::decode(&body)? {
-                    Entry::Commit { index, commond, .. } => {
-                        if let Err(e) = simba.do_write(index, &commond, true) {
-                            error!("init raft log has err:{:?} line:{:?}", e, commond);
-                        }
+    async fn init_simba_by_raft(&self, simba: &Arc<Simba>, raft: &Arc<Raft>) -> RaftResult<()> {
+        let index = simba.get_raft_index() + 1;
+        let mut iter = raft.store.iter(index).await?;
+
+        while let Some(body) = iter.next(&raft.store).await? {
+            match Entry::decode(&body)? {
+                Entry::Commit { index, commond, .. } => {
+                    if let Err(e) = simba.do_write(index, &commond, true) {
+                        error!("init raft log has err:{:?} line:{:?}", e, commond);
                     }
-                    _ => panic!("not support"),
                 }
-                Ok(true)
-            })
-            .await
-        {
-            return Err(e.into());
-        };
+                Entry::LeaderChange { .. } => {}
+                Entry::MemberChange { .. } => {
+                    //TODO: member change ........
+                }
+                _ => panic!("not support"),
+            }
+        }
         Ok(())
     }
 
@@ -465,9 +467,10 @@ impl PartitionService {
         return Ok(cdr);
     }
 
-    pub async fn search(&self, sdreq: SearchDocumentRequest) -> ASResult<SearchDocumentResponse> {
-        assert_ne!(sdreq.cpids.len(), 0);
-        let (tx, rx) = mpsc::channel();
+    pub async fn agg(&self, sdreq: QueryRequest) -> ASResult<AggregationResponse> {
+        let len = sdreq.cpids.len();
+
+        let (tx, rx) = channel(len);
 
         let sdreq = Arc::new(sdreq);
 
@@ -478,8 +481,8 @@ impl PartitionService {
                     let simba = simba.clone();
                     let tx = tx.clone();
                     let sdreq = sdreq.clone();
-                    thread::spawn(move || {
-                        tx.send(simba.search(sdreq)).unwrap();
+                    task::spawn(async move {
+                        tx.send(simba.agg(sdreq)).await;
                     });
                 } else {
                     return make_not_found_err(cpid.0, cpid.1);
@@ -489,19 +492,64 @@ impl PartitionService {
             }
         }
 
-        empty(tx);
+        let mut dist = rx.recv().await?;
 
-        let mut dist = rx.recv()?;
-        for src in rx {
-            dist = merge_search_document_response(dist, src);
+        if sdreq.cpids.len() == 1 {
+            return Ok(dist);
         }
-        dist.hits.sort_by(|v1, v2| {
-            if v1.score >= v2.score {
-                std::cmp::Ordering::Less
+
+        let mut result = HashMap::new();
+        for v in std::mem::replace(&mut dist.result, Vec::default()) {
+            result.insert(v.key.clone(), v);
+        }
+
+        for _ in 0..len - 1 {
+            dist = merge_aggregation_response(dist, &mut result, rx.recv().await.unwrap());
+        }
+
+        dist.result = aggregation::make_vec(result, &sdreq.sort, sdreq.size as usize)?;
+
+        Ok(dist)
+    }
+
+    pub async fn search(&self, sdreq: QueryRequest) -> ASResult<SearchDocumentResponse> {
+        let len = sdreq.cpids.len();
+
+        let (tx, rx) = channel(len);
+
+        let sdreq = Arc::new(sdreq);
+
+        for cpid in sdreq.cpids.iter() {
+            let cpid = coding::split_u32(*cpid);
+            if let Some(store) = self.simba_map.read().unwrap().get(&cpid) {
+                if let Ok(simba) = store.simba() {
+                    let simba = simba.clone();
+                    let tx = tx.clone();
+                    let sdreq = sdreq.clone();
+                    task::spawn(async move {
+                        tx.send(simba.search(sdreq)).await;
+                    });
+                } else {
+                    return make_not_found_err(cpid.0, cpid.1);
+                }
             } else {
-                std::cmp::Ordering::Greater
+                return make_not_found_err(cpid.0, cpid.1);
             }
-        });
+        }
+
+        let mut dist = rx.recv().await?;
+        for _ in 0..len - 1 {
+            dist = merge_search_document_response(dist, rx.recv().await.unwrap());
+        }
+
+        let asc = if sdreq.sort.len() == 0 {
+            vec![true]
+        } else {
+            sdreq.sort.iter().map(|o| o.order == "asc").collect()
+        };
+
+        dist.hits
+            .sort_by(|v1, v2| FieldScore::cmp_by_order(&v1.sort, &v2.sort, &asc));
 
         if dist.hits.len() > sdreq.size as usize {
             unsafe {
@@ -536,7 +584,7 @@ impl PartitionService {
         let mut result = Vec::new();
 
         for entry in std::fs::read_dir(path)? {
-            let file = convert(entry)?;
+            let file = conver(entry)?;
             let meta = file.metadata()?;
             result.push(json!({
                 "path": file.file_name().into_string(),
@@ -545,11 +593,9 @@ impl PartitionService {
             }));
         }
 
-        convert(serde_json::to_vec(&result))
+        conver(serde_json::to_vec(&result))
     }
 }
-
-fn empty(_: mpsc::Sender<SearchDocumentResponse>) {}
 
 fn make_not_found_err<T>(cid: u32, pid: u32) -> ASResult<T> {
     result!(

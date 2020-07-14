@@ -41,7 +41,7 @@ pub struct IndexField {
 
 impl IndexField {
     fn add_with_ids(&self, ids: &Vec<i64>, data: &Vec<f32>) -> ASResult<()> {
-        convert(self.index.read().unwrap().add_with_ids(ids, data))
+        conver(self.index.read().unwrap().add_with_ids(ids, data))
     }
 
     fn search(&self, queries: &Vec<f32>, size: i32) -> ASResult<(Vec<i64>, Vec<f32>)> {
@@ -240,7 +240,7 @@ impl Faiss {
 
     pub fn search(
         &self,
-        sdreq: Arc<SearchDocumentRequest>,
+        sdreq: Arc<QueryRequest>,
         _bitmap: Option<RoaringBitmap>,
         total: u64,
     ) -> ASResult<SearchDocumentResponse> {

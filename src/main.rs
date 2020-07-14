@@ -18,7 +18,7 @@ use std::sync::{mpsc::channel, Arc};
 use std::thread;
 
 fn main() {
-    let app = App::new("anyindex")
+    let app = App::new("chubaodb")
         .version(clap::crate_version!())
         .about("hello index world")
         .subcommand(
@@ -114,7 +114,7 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let _ = pserver::server::start(tx_clone, arc);
+                let _ = async_std::task::block_on(pserver::server::start(tx_clone, arc));
             });
         }
         "router" => {
@@ -140,7 +140,7 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let _ = pserver::server::start(tx_clone, arc);
+                let _ = async_std::task::block_on(pserver::server::start(tx_clone, arc));
             });
         }
         _ => panic!("Subcommand {} is unknow", subcommand),

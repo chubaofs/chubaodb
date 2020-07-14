@@ -22,10 +22,8 @@ use log::{error, info};
 use std::error::Error;
 use std::sync::{mpsc::Sender, Arc};
 use std::time;
-use tokio;
 use tonic::{transport::Server, Request, Response, Status};
 
-#[tokio::main]
 pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> Result<(), Box<dyn Error>> {
     //if ps got ip is empty to got it by master
     let mut config = (*conf).clone();
@@ -116,9 +114,20 @@ impl Rpc for RPCService {
 
     async fn search(
         &self,
-        request: Request<SearchDocumentRequest>,
+        request: Request<QueryRequest>,
     ) -> Result<Response<SearchDocumentResponse>, Status> {
         let result = match self.service.search(request.into_inner()).await {
+            Ok(gr) => gr,
+            Err(e) => e.into(),
+        };
+        Ok(Response::new(result))
+    }
+
+    async fn agg(
+        &self,
+        request: Request<QueryRequest>,
+    ) -> Result<Response<AggregationResponse>, Status> {
+        let result = match self.service.agg(request.into_inner()).await {
             Ok(gr) => gr,
             Err(e) => e.into(),
         };

@@ -12,9 +12,9 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::pserver::raft::*;
-#[cfg(not(target_os = "windows"))]
+#[cfg(vector)]
 use crate::pserver::simba::engine::faiss::Faiss;
-#[cfg(target_os = "windows")]
+#[cfg(not(vecotr))]
 use crate::pserver::simba::engine::faiss_empty::Faiss;
 use crate::pserver::simba::engine::{
     engine::{BaseEngine, Engine},
@@ -33,7 +33,7 @@ use crate::util::{
     time::current_millis,
 };
 use crate::*;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use prost::Message;
 use raft4rs::{error::RaftError, raft::Raft};
 use roaring::RoaringBitmap;
@@ -143,7 +143,7 @@ impl Simba {
         Ok(count_rep)
     }
 
-    pub fn search(&self, sdreq: Arc<SearchDocumentRequest>) -> SearchDocumentResponse {
+    pub fn search(&self, sdreq: Arc<QueryRequest>) -> SearchDocumentResponse {
         let mut resp = if sdreq.vector_query.is_none() {
             match self.tantivy.query(sdreq) {
                 Ok(r) => r,
@@ -171,6 +171,13 @@ impl Simba {
         }
 
         return resp;
+    }
+
+    pub fn agg(&self, ar: Arc<QueryRequest>) -> AggregationResponse {
+        match self.tantivy.agg(ar) {
+            Ok(r) => r,
+            Err(e) => e.into(),
+        }
     }
 
     pub async fn write(&self, req: WriteDocumentRequest, raft: Arc<Raft>) -> ASResult<()> {
@@ -337,7 +344,7 @@ impl Simba {
         }
 
         doc.vectors = vectors;
-        doc.source = serde_json::to_vec(&source)?;
+        doc.source = serde_json::to_vec(&0)?;
 
         if let Err(error) = doc.encode(&mut buf) {
             return Err(error.into());
@@ -349,17 +356,8 @@ impl Simba {
         match raft.submit(event.encode()).await {
             Ok(()) => Ok(()),
             Err(e) => match e {
-                RaftError::ErrCode(c, m) => {
-                    println!(
-                        "111======================================{}",
-                        ASError::Error(Code::from_i32(c), m.clone())
-                    );
-                    Err(ASError::Error(Code::from_i32(c), m))
-                }
-                _ => {
-                    println!("======================================{}", e);
-                    Err(ASError::from(e))
-                }
+                RaftError::ErrCode(c, m) => Err(ASError::Error(Code::from_i32(c), m)),
+                _ => Err(ASError::from(e)),
             },
         }
     }
@@ -464,7 +462,7 @@ impl Simba {
                 pre_index = index;
             }
 
-            info!("flush job ok use time:{}ms", current_millis() - begin);
+            debug!("flush job ok use time:{}ms", current_millis() - begin);
         }
         Ok(())
     }
@@ -503,6 +501,10 @@ impl Simba {
     pub fn general_id(&self) -> u32 {
         let id = self.max_iid.fetch_add(1, SeqCst);
         return id + 1;
+    }
+
+    pub fn arc_count(&self) {
+        self.rocksdb.arc_count.fetch_add(1, SeqCst);
     }
 }
 

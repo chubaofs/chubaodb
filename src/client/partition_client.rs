@@ -44,7 +44,7 @@ impl PartitionClient {
         mut rpc_client: RpcClient<Channel>,
         req: WriteDocumentRequest,
     ) -> ASResult<GeneralResponse> {
-        let resp = convert(rpc_client.write(Request::new(req)).await)?.into_inner();
+        let resp = conver(rpc_client.write(Request::new(req)).await)?.into_inner();
         result_obj_code!(resp)
     }
 
@@ -53,7 +53,7 @@ impl PartitionClient {
         mut rpc_client: RpcClient<Channel>,
         req: GetDocumentRequest,
     ) -> ASResult<DocumentResponse> {
-        let resp = convert(rpc_client.get(Request::new(req)).await)?.into_inner();
+        let resp = conver(rpc_client.get(Request::new(req)).await)?.into_inner();
         result_obj_code!(resp)
     }
 }
@@ -103,24 +103,18 @@ impl MultiplePartitionClient {
         }
     }
 
-    pub async fn search(
-        self,
-        query: String,
-        def_fields: Vec<String>,
-        vector_query: Option<VectorQuery>,
-        size: u32,
-    ) -> ASResult<SearchDocumentResponse> {
+    pub async fn search(self, query: QueryRequest) -> ASResult<SearchDocumentResponse> {
         let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
 
-        let resp = rpc_client
-            .search(Request::new(SearchDocumentRequest {
-                cpids: self.collection_partition_ids,
-                query: query,
-                def_fields: def_fields,
-                vector_query: vector_query,
-                size: size,
-            }))
-            .await?;
+        let resp = rpc_client.search(Request::new(query)).await?;
+
+        Ok(resp.into_inner())
+    }
+
+    pub async fn agg(self, query: QueryRequest) -> ASResult<AggregationResponse> {
+        let mut rpc_client = RpcClient::new(Endpoint::from_shared(self.addr())?.connect().await?);
+
+        let resp = rpc_client.agg(Request::new(query)).await?;
 
         Ok(resp.into_inner())
     }

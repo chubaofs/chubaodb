@@ -77,19 +77,19 @@ impl RocksDB {
     pub fn write(&self, key: &Vec<u8>, value: &Vec<u8>) -> ASResult<()> {
         let mut batch = WriteBatch::default();
         batch.put(key, value);
-        convert(self.db.write_opt(batch, &self.wo))?;
+        conver(self.db.write_opt(batch, &self.wo))?;
         Ok(())
     }
 
     pub fn write_batch(&self, batch: WriteBatch) -> ASResult<()> {
-        convert(self.db.write_opt(batch, &&self.wo))?;
+        conver(self.db.write_opt(batch, &&self.wo))?;
         Ok(())
     }
 
     pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> ASResult<()> {
         let mut batch = WriteBatch::default();
         batch.delete(key);
-        convert(self.db.write_opt(batch, &&self.wo))?;
+        conver(self.db.write_opt(batch, &&self.wo))?;
         Ok(())
     }
 
@@ -121,7 +121,7 @@ impl RocksDB {
     pub fn write_raft_index(&self, raft_index: u64) -> ASResult<()> {
         let mut batch = WriteBatch::default();
         batch.put(RAFT_INDEX_KEY, &u64_slice(raft_index)[..]);
-        convert(self.db.write_opt(batch, &&self.wo))?;
+        conver(self.db.write_opt(batch, &&self.wo))?;
         Ok(())
     }
 
@@ -167,7 +167,7 @@ impl Engine for RocksDB {
         let mut flush_options = FlushOptions::default();
         flush_options.set_wait(true);
         self.db.flush_cf(self.id_cf())?;
-        convert(self.db.flush_opt(&flush_options))
+        conver(self.db.flush_opt(&flush_options))
     }
 
     fn release(&self) {

@@ -13,6 +13,7 @@
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
 use crate::client::partition_client::*;
+use crate::pserver::simba::aggregation;
 use crate::pserverpb::rpc_client::RpcClient;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
@@ -165,32 +166,24 @@ impl PsClient {
     pub async fn search(
         &self,
         collection_name: &str,
-        query: String,
-        def_fields: Vec<String>,
-        vector_query: Option<VectorQuery>,
-        size: u32,
+        query: QueryRequest,
     ) -> ASResult<SearchDocumentResponse> {
         'outer: for i in 0..RETRY {
-            let (tx, rx) = channel::<SearchDocumentResponse>(10);
+            let (tx, rx) = channel(10);
 
             match self.select_collection(collection_name).await {
                 Ok(mpl) => {
                     for mp in mpl {
+                        let mut query = query.clone();
+                        query.cpids = mp.collection_partition_ids.clone();
                         let tx = tx.clone();
-                        let query = query.clone();
-                        let def_fields = def_fields.clone();
-                        let vq = vector_query.clone();
                         task::spawn(async move {
-                            match mp.search(query, def_fields, vq, size).await {
+                            match mp.search(query).await {
                                 Ok(resp) => {
-                                    if let Err(e) = tx.try_send(resp) {
-                                        error!("send result has err:{:?}", e); //TODO: if errr
-                                    };
+                                    tx.send(resp).await;
                                 }
                                 Err(e) => {
-                                    if let Err(e) = tx.try_send(e.into()) {
-                                        error!("send result has err:{:?}", e); //TODO: if errr
-                                    };
+                                    tx.send(e.into()).await;
                                 }
                             };
                         });
@@ -205,7 +198,7 @@ impl PsClient {
                 }
             };
 
-            // drop(tx);
+            drop(tx);
 
             let mut dist = rx.recv().await.unwrap();
 
@@ -213,24 +206,99 @@ impl PsClient {
                 && self.check_response_cache(
                     i,
                     collection_name,
-                    err!(dist.code, msg_for_search_resp(&dist)),
+                    err!(dist.code, msg_for_resp(&dist.info)),
                 )
             {
                 continue 'outer;
             }
-
             while let Ok(src) = rx.recv().await {
                 if Code::from_i32(src.code) != Code::Success
                     && self.check_response_cache(
                         i,
                         collection_name,
-                        err!(dist.code, msg_for_search_resp(&dist)),
+                        err!(dist.code, msg_for_resp(&dist.info)),
                     )
                 {
                     continue 'outer;
                 }
                 dist = merge_search_document_response(dist, src);
             }
+
+            return Ok(dist);
+        }
+        panic!("out of range");
+    }
+
+    pub async fn agg(
+        &self,
+        collection_name: &str,
+        query: QueryRequest,
+    ) -> ASResult<AggregationResponse> {
+        'outer: for i in 0..RETRY {
+            let (tx, rx) = channel::<AggregationResponse>(10);
+
+            let mut result_size: i32 = 0;
+
+            match self.select_collection(collection_name).await {
+                Ok(mpl) => {
+                    for mp in mpl {
+                        let mut query = query.clone();
+                        query.cpids = mp.collection_partition_ids.clone();
+                        let tx = tx.clone();
+                        result_size += 1;
+                        task::spawn(async move {
+                            match mp.agg(query).await {
+                                Ok(resp) => tx.send(resp).await,
+                                Err(e) => tx.send(e.into()).await,
+                            };
+                        });
+                    }
+                }
+                Err(e) => {
+                    if self.check_err_cache(i, collection_name, &e) {
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
+
+            drop(tx);
+
+            let mut dist = rx.recv().await.unwrap();
+
+            if result_size == 1 {
+                return Ok(dist);
+            }
+
+            let mut result = HashMap::new();
+            for v in std::mem::replace(&mut dist.result, Vec::default()) {
+                result.insert(v.key.clone(), v);
+            }
+
+            if Code::from_i32(dist.code) != Code::Success
+                && self.check_response_cache(
+                    i,
+                    collection_name,
+                    err!(dist.code, msg_for_resp(&dist.info)),
+                )
+            {
+                continue 'outer;
+            }
+            while let Ok(src) = rx.recv().await {
+                if Code::from_i32(src.code) != Code::Success
+                    && self.check_response_cache(
+                        i,
+                        collection_name,
+                        err!(dist.code, msg_for_resp(&dist.info)),
+                    )
+                {
+                    continue 'outer;
+                }
+                dist = merge_aggregation_response(dist, &mut result, src);
+            }
+
+            dist.result = aggregation::make_vec(result, &query.sort, query.size as usize)?;
 
             return Ok(dist);
         }
@@ -247,11 +315,7 @@ impl PsClient {
                         let tx = tx.clone();
                         task::spawn(async move {
                             match mp.count().await {
-                                Ok(resp) => {
-                                    if let Err(e) = tx.try_send(resp) {
-                                        error!("send result has err:{:?}", e); //TODO: if errr
-                                    };
-                                }
+                                Ok(resp) => tx.send(resp).await,
                                 Err(e) => {
                                     if let Err(e) = tx.try_send(e.into()) {
                                         error!("send result has err:{:?}", e); //TODO: if errr
@@ -269,6 +333,8 @@ impl PsClient {
                     }
                 }
             };
+
+            drop(tx);
 
             let mut dist = rx.recv().await.unwrap();
 

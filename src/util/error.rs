@@ -74,7 +74,7 @@ macro_rules! result_obj_code {
     }};
 }
 
-pub fn convert<T, E: std::fmt::Display>(result: Result<T, E>) -> ASResult<T> {
+pub fn conver<T, E: std::fmt::Display>(result: Result<T, E>) -> ASResult<T> {
     match result {
         Ok(t) => Ok(t),
         Err(e) => Err(ASError::Error(Code::InternalErr, format!("{}", e))),
@@ -104,6 +104,7 @@ pub enum Code {
     HttpAPIRequestErr,
     EncodingErr,
     DencodingErr,
+    Timeout,
 }
 
 impl Code {
@@ -137,6 +138,13 @@ impl ASError {
         match self {
             ASError::Success => Code::Success,
             ASError::Error(c, _) => *c,
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            ASError::Success => String::from("success"),
+            ASError::Error(_, s) => s.clone(),
         }
     }
 
@@ -179,6 +187,22 @@ impl Into<SearchDocumentResponse> for ASError {
             code: self.code().into(),
             total: 0,
             hits: vec![],
+            info: Some(SearchInfo {
+                error: 1,
+                success: 0,
+                message: self.to_string(),
+            }),
+        }
+    }
+}
+
+impl Into<AggregationResponse> for ASError {
+    fn into(self) -> AggregationResponse {
+        AggregationResponse {
+            code: self.code().into(),
+            total: 0,
+            size: 0,
+            result: vec![],
             info: Some(SearchInfo {
                 error: 1,
                 success: 0,

@@ -1,4 +1,4 @@
-use crate::pserver::simba::engine::tantivy::ID_BYTES_INDEX;
+use crate::pserver::simba::engine::tantivy::ID_INDEX;
 use crate::util::coding::slice_i64;
 use roaring::RoaringBitmap;
 use tantivy::{
@@ -20,7 +20,7 @@ impl Collector for Bitmap {
     ) -> tantivy::Result<SegmentBitMapCollector> {
         Ok(SegmentBitMapCollector {
             bit_map: RoaringBitmap::new(),
-            fast_field: sr.fast_fields().bytes(Field::from_field_id(ID_BYTES_INDEX)),
+            fast_field: sr.fast_fields().bytes(Field::from_field_id(ID_INDEX)),
         })
     }
 

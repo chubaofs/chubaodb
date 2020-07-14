@@ -12,9 +12,9 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 pub mod engine;
-#[cfg(not(target_os = "windows"))]
+#[cfg(vector)]
 pub mod faiss;
-#[cfg(target_os = "windows")]
+#[cfg(not(vector))]
 pub mod faiss_empty;
 pub mod rocksdb;
 pub mod tantivy;

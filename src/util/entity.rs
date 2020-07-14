@@ -18,6 +18,9 @@ use crate::*;
 use async_graphql::{Enum, InputObject};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+
+pub const ID_BYTES: &'static str = "_iid_bytes";
 
 #[InputObject]
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -29,6 +32,12 @@ pub struct IntField {
     #[field(desc = "value can miss", default = false)]
     #[serde(default = "default_false")]
     pub none: bool,
+    #[field(
+        desc = "is value to store it in column , if it need sort or get or aggregation",
+        default = false
+    )]
+    #[serde(default = "default_false")]
+    pub value: bool,
 }
 
 #[InputObject]
@@ -41,6 +50,12 @@ pub struct FloatField {
     #[field(desc = "value can miss", default = false)]
     #[serde(default = "default_false")]
     pub none: bool,
+    #[field(
+        desc = "is value to store it in column , if it need sort or get or aggregation",
+        default = false
+    )]
+    #[serde(default = "default_false")]
+    pub value: bool,
 }
 
 fn default_false() -> bool {
@@ -57,6 +72,12 @@ pub struct StringField {
     #[field(desc = "value can miss", default = false)]
     #[serde(default = "default_false")]
     pub none: bool,
+    #[field(
+        desc = "is value to store it in column , if it need sort or get or aggregation",
+        default = false
+    )]
+    #[serde(default = "default_false")]
+    pub value: bool,
 }
 
 #[InputObject]
@@ -69,10 +90,45 @@ pub struct TextField {
     #[field(desc = "value can miss", default = false)]
     #[serde(default = "default_false")]
     pub none: bool,
+    #[field(
+        desc = "is value to store it in column , if it need sort or get or aggregation",
+        default = false
+    )]
+    #[serde(default = "default_false")]
+    pub value: bool,
+}
+
+#[InputObject]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BytesField {
+    pub name: String,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+}
+
+#[InputObject]
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DateField {
+    pub name: String,
+    #[field(desc = "time str format", default = "auto")]
+    pub format: String,
+    #[field(desc = "is array type of values", default = false)]
+    #[serde(default = "default_false")]
+    pub array: bool,
+    #[field(desc = "value can miss", default = false)]
+    #[serde(default = "default_false")]
+    pub none: bool,
+    #[field(
+        desc = "is value to store it in column , if it need sort or get or aggregation",
+        default = false
+    )]
+    #[serde(default = "default_false")]
+    pub value: bool,
 }
 
 #[Enum(desc = "computer method default is L2")]
-#[derive(Serialize, Deserialize, Clone, Debug, Copy)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum MetricType {
     L2 = 1,
     InnerProduct = 2,
@@ -143,6 +199,8 @@ pub enum Field {
     float(FloatField),
     string(StringField),
     text(TextField),
+    bytes(BytesField),
+    date(DateField),
     vector(VectorField),
 }
 
@@ -168,6 +226,8 @@ impl Field {
             Field::float(f) => f.name.as_str(),
             Field::string(f) => f.name.as_str(),
             Field::text(f) => f.name.as_str(),
+            Field::bytes(f) => f.name.as_str(),
+            Field::date(f) => f.name.as_str(),
             Field::vector(f) => f.name.as_str(),
         }
     }
@@ -178,6 +238,8 @@ impl Field {
             Field::float(f) => f.array,
             Field::string(f) => f.array,
             Field::text(f) => f.array,
+            Field::bytes(_) => false,
+            Field::date(f) => f.array,
             Field::vector(f) => f.array,
         }
     }
@@ -188,7 +250,21 @@ impl Field {
             Field::float(f) => f.none,
             Field::string(f) => f.none,
             Field::text(f) => f.none,
+            Field::bytes(f) => f.none,
+            Field::date(f) => f.none,
             Field::vector(f) => f.none,
+        }
+    }
+
+    pub fn value(&self) -> bool {
+        match self {
+            Field::int(f) => f.value,
+            Field::float(f) => f.value,
+            Field::string(f) => f.value,
+            Field::text(f) => f.value,
+            Field::bytes(_) => true,
+            Field::date(f) => f.value,
+            _ => false,
         }
     }
 
@@ -264,6 +340,26 @@ impl Field {
                     );
                 }
             }
+            Field::bytes(f) => {
+                if !v.is_string() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect text but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
+            Field::date(f) => {
+                if !v.is_number() && !v.is_string() {
+                    return result!(
+                        Code::FieldTypeErr,
+                        "field:{} expect date but found:{:?} ",
+                        f.name,
+                        v,
+                    );
+                }
+            }
             Field::vector(_) => {
                 panic!("not vector field");
             }
@@ -310,6 +406,7 @@ pub struct Partition {
     pub version: u64,
     pub replicas: Vec<Replica>,
 }
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Replica {
     pub node_id: u32,
@@ -318,7 +415,8 @@ pub struct Replica {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ReplicaType {
-    NORMAL = 0,  //normal type
+    NORMAL = 0,
+    //normal type
     LEARNER = 1, //learner type
 }
 
@@ -377,8 +475,8 @@ pub fn merge_count_document_response(
     dist
 }
 
-pub fn msg_for_search_resp(dist: &SearchDocumentResponse) -> String {
-    match &dist.info {
+pub fn msg_for_resp(info: &Option<SearchInfo>) -> String {
+    match info {
         Some(i) => i.message.clone(),
         None => format!("not found info"),
     }
@@ -420,6 +518,95 @@ pub fn merge_search_document_response(
     dist
 }
 
+pub fn merge_aggregation_response(
+    mut dist: AggregationResponse,
+    result: &mut HashMap<String, AggValues>,
+    src: AggregationResponse,
+) -> AggregationResponse {
+    if src.code != Code::Success as i32 {
+        dist.code = src.code;
+    }
+
+    dist.total = src.total + dist.total;
+
+    merge_aggregation_result(result, src.result);
+
+    dist.info = {
+        let mut d = dist.info.unwrap_or(SearchInfo {
+            success: 1,
+            error: 0,
+            message: String::default(),
+        });
+        match src.info {
+            Some(s) => {
+                d.success += s.success;
+                d.error += s.error;
+                if !s.message.is_empty() {
+                    d.message.push_str("\n");
+                    d.message.push_str(s.message.as_str());
+                }
+            }
+            None => {
+                d.success += 1;
+            }
+        }
+        Some(d)
+    };
+
+    dist
+}
+
+fn merge_aggregation_result(dist: &mut HashMap<String, AggValues>, src: Vec<AggValues>) {
+    for v in src.into_iter() {
+        if let Some(dv) = dist.get_mut(&v.key) {
+            merge_aggregation_values(dv, v);
+        } else {
+            dist.insert(v.key.clone(), v);
+        }
+    }
+}
+fn merge_aggregation_values(dist: &mut AggValues, src: AggValues) {
+    for (i, v) in src.values.into_iter().enumerate() {
+        merge_aggregation_value(dist.values.get_mut(i).unwrap(), v);
+    }
+}
+
+fn merge_aggregation_value(dist: &mut AggValue, src: AggValue) {
+    match &mut dist.agg_value {
+        Some(agg_value::AggValue::Stats(s)) => {
+            if let Some(agg_value::AggValue::Stats(src)) = src.agg_value {
+                s.count += src.count;
+                s.max = src.max;
+                s.min = src.min;
+                s.sum = src.sum;
+                s.missing = src.missing;
+            } else {
+                panic!("impossible agg result has none");
+            }
+        }
+        Some(agg_value::AggValue::Hits(h)) => {
+            if let Some(agg_value::AggValue::Hits(src)) = src.agg_value {
+                h.count += src.count;
+
+                if h.hits.len() as u64 >= h.size {
+                    return;
+                }
+
+                for hit in src.hits {
+                    h.hits.push(hit);
+                    if h.hits.len() as u64 >= h.size {
+                        return;
+                    }
+                }
+            } else {
+                panic!("impossible agg result has none");
+            }
+        }
+        _ => panic!("impossible agg result has none"),
+    }
+    panic!()
+}
+
 pub trait MakeKey {
     fn make_key(&self) -> String;
 }
@@ -446,7 +633,6 @@ impl MakeKey for PServer {
 }
 
 pub mod entity_key {
-
     const PREFIX_PSERVER: &str = "/META/SERVER";
     const PREFIX_COLLECTION: &str = "/META/COLLECTION";
     const PREFIX_PARTITION: &str = "/META/PARTITION";
@@ -459,6 +645,7 @@ pub mod entity_key {
     pub fn pserver(addr: &str) -> String {
         format!("{}/{}", PREFIX_PSERVER, addr)
     }
+
     pub fn pserver_prefix() -> String {
         format!("{}/", PREFIX_PSERVER)
     }

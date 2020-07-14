@@ -13,6 +13,7 @@
 // permissions and limitations under the License.
 pub mod coding;
 pub mod config;
+pub mod convert;
 pub mod entity;
 pub mod error;
 pub mod http_client;

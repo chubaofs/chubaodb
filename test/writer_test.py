@@ -124,97 +124,97 @@ def test_create():
     print("create---\n" + response.text)
     assert response.status_code == 200
 
-#     # second create
-#     url = "http://" + config.ROUTER + "/create/t1/1"
-#     headers = {"content-type": "application/json"}
-#     data = {
-#         "name": ["ansj", "sun"],
-#         "age": 35,
-#         "content": "hello tig"
-#     }
-#     print(url + "---" + json.dumps(data))
-#     response = requests.post(url, headers=headers, data=json.dumps(data))
-#     print("create---\n" + response.text)
-#     assert response.status_code == 550
-#     # get doc
-#     response = requests.get("http://"+config.ROUTER+"/get/t1/1")
-#     print("get--" + response.text)
-#     assert response.status_code == 200
-#     v = json.loads(response.text)
-#     assert v["doc"]["_version"] == 1
+    # second create
+    url = "http://" + config.ROUTER + "/create/t1/1"
+    headers = {"content-type": "application/json"}
+    data = {
+        "name": ["ansj", "sun"],
+        "age": 35,
+        "content": "hello tig"
+    }
+    print(url + "---" + json.dumps(data))
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    print("create---\n" + response.text)
+    assert response.status_code == 550
+    # get doc
+    response = requests.get("http://"+config.ROUTER+"/get/t1/1")
+    print("get--" + response.text)
+    assert response.status_code == 200
+    v = json.loads(response.text)
+    assert v["doc"]["_version"] == 1
 
 
-# def test_upsert():
-#     test_delete()
+def test_upsert():
+    test_delete()
 
-#     ####################################
-#     url = "http://" + config.ROUTER + "/upsert/t1/1"
-#     headers = {"content-type": "application/json"}
-#     data = {
-#         "name": ["ansj", "sun"],
-#         "age": 35,
-#         "content": "hello tig"
-#     }
-#     print(url + "---" + json.dumps(data))
-#     response = requests.post(url, headers=headers, data=json.dumps(data))
-#     print("upsert---" + response.text)
-#     assert response.status_code == 200
-#     # find by id
-#     response = requests.get("http://"+config.ROUTER+"/get/t1/1")
-#     print("get---" + response.text)
-#     assert response.status_code == 200
-#     v = json.loads(response.text)
-#     assert v["code"] == 200
-#     assert v["doc"]["_source"]["name"] == ["ansj", "sun"]
-#     assert v["doc"]["_version"] == 1
-#     # same upsert
-#     url = "http://" + config.ROUTER + "/upsert/t1/1"
-#     headers = {"content-type": "application/json"}
-#     data = {
-#         "name": ["ansj", "ansj"],
-#         "age": 35,
-#         "content": "hello tig"
-#     }
-#     print(url + "---" + json.dumps(data))
-#     response = requests.post(url, headers=headers, data=json.dumps(data))
-#     print("upsert---" + response.text)
-#     assert response.status_code == 200
-#     # get doc
-#     response = requests.get("http://"+config.ROUTER+"/get/t1/1")
-#     print("get ---" + response.text)
-#     assert response.status_code == 200
-#     v = json.loads(response.text)
-#     assert v["doc"]["_version"] == 2
-#     assert v["doc"]["_source"]["name"] == ["ansj", "ansj"]
+    ####################################
+    url = "http://" + config.ROUTER + "/upsert/t1/1"
+    headers = {"content-type": "application/json"}
+    data = {
+        "name": ["ansj", "sun"],
+        "age": 35,
+        "content": "hello tig"
+    }
+    print(url + "---" + json.dumps(data))
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    print("upsert---" + response.text)
+    assert response.status_code == 200
+    # find by id
+    response = requests.get("http://"+config.ROUTER+"/get/t1/1")
+    print("get---" + response.text)
+    assert response.status_code == 200
+    v = json.loads(response.text)
+    assert v["code"] == 200
+    assert v["doc"]["_source"]["name"] == ["ansj", "sun"]
+    assert v["doc"]["_version"] == 1
+    # same upsert
+    url = "http://" + config.ROUTER + "/upsert/t1/1"
+    headers = {"content-type": "application/json"}
+    data = {
+        "name": ["ansj", "ansj"],
+        "age": 35,
+        "content": "hello tig"
+    }
+    print(url + "---" + json.dumps(data))
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    print("upsert---" + response.text)
+    assert response.status_code == 200
+    # get doc
+    response = requests.get("http://"+config.ROUTER+"/get/t1/1")
+    print("get ---" + response.text)
+    assert response.status_code == 200
+    v = json.loads(response.text)
+    assert v["doc"]["_version"] == 2
+    assert v["doc"]["_source"]["name"] == ["ansj", "ansj"]
 
-#     # diff upsert
-#     url = "http://" + config.ROUTER + "/upsert/t1/1"
-#     headers = {"content-type": "application/json"}
-#     data = {
-#         "name": ["ansj", "sun"],
-#         "age": 36
-#     }
-#     print(url + "---" + json.dumps(data))
-#     response = requests.post(url, headers=headers, data=json.dumps(data))
-#     print("put---" + response.text)
-#     assert response.status_code == 200
-#     # get doc
-#     response = requests.get("http://"+config.ROUTER+"/get/t1/1")
-#     print("get--" + response.text)
-#     assert response.status_code == 200
-#     v = json.loads(response.text)
-#     assert v["doc"]["_version"] == 3
-#     assert v["doc"]["_source"]["name"] == ["ansj", "sun"]
-#     assert v["doc"]["_source"]["age"] == 36
-#     assert v["doc"]["_source"]["content"] == "hello tig"
+    # diff upsert
+    url = "http://" + config.ROUTER + "/upsert/t1/1"
+    headers = {"content-type": "application/json"}
+    data = {
+        "name": ["ansj", "sun"],
+        "age": 36
+    }
+    print(url + "---" + json.dumps(data))
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    print("put---" + response.text)
+    assert response.status_code == 200
+    # get doc
+    response = requests.get("http://"+config.ROUTER+"/get/t1/1")
+    print("get--" + response.text)
+    assert response.status_code == 200
+    v = json.loads(response.text)
+    assert v["doc"]["_version"] == 3
+    assert v["doc"]["_source"]["name"] == ["ansj", "sun"]
+    assert v["doc"]["_source"]["age"] == 36
+    assert v["doc"]["_source"]["content"] == "hello tig"
 
 
-# def test_search():
-#     time.sleep(5)
-#     response = requests.get(
-#         "http://"+config.ROUTER+"/search/t1?query=hello%20tig&size=10&def_fields=content")
-#     print("space_create---\n" + response.text)
-#     assert response.status_code == 200
-#     v = json.loads(response.text)
-#     assert v["code"] == 200
-#     assert v["hits"][0]["doc"]["_source"]["name"] == ["ansj", "sun"]
+def test_search():
+    time.sleep(5)
+    response = requests.get(
+        "http://"+config.ROUTER+"/search/t1?query=hello%20tig&size=10&def_fields=content")
+    print("space_create---\n" + response.text)
+    assert response.status_code == 200
+    v = json.loads(response.text)
+    assert v["code"] == 200
+    assert v["hits"][0]["doc"]["_source"]["name"] == ["ansj", "sun"]
