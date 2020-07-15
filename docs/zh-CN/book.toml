@@ -1,0 +1,6 @@
+[book]
+authors = ["AnsjSun"]
+language = "cn"
+multilingual = false
+src = "src"
+title = "chubaodb 白皮书"

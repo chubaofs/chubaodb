@@ -253,7 +253,7 @@ impl Hits {
     }
 
     pub fn map(&mut self, value: Vec<u8>) -> ASResult<bool> {
-        if self.result.hits.len() > self.result.size as usize {
+        if self.result.hits.len() >= self.result.size as usize {
             return Ok(false);
         }
         let result = &mut self.result;
