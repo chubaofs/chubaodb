@@ -1,0 +1,668 @@
+<!DOCTYPE HTML>
+<html lang="cn" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>chubaodb 白皮书</title>
+        
+        <meta name="robots" content="noindex" />
+        
+        
+
+
+        <!-- Custom HTML head -->
+        
+
+
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        
+        <link rel="stylesheet" href="fonts/fonts.css">
+        
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        
+
+        
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="introduction.html"><strong aria-hidden="true">1.</strong> 介绍</a></li><li class="chapter-item expanded "><a href="install.html"><strong aria-hidden="true">2.</strong> 编译与安装</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="config.html"><strong aria-hidden="true">2.1.</strong> 配置文件</a></li><li class="chapter-item expanded "><a href="cluster.html"><strong aria-hidden="true">2.2.</strong> 集群模式</a></li></ol></li><li class="chapter-item expanded "><a href="master.html"><strong aria-hidden="true">3.</strong> 元数据管理</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="collection.html"><strong aria-hidden="true">3.1.</strong> 库表管理</a></li></ol></li><li class="chapter-item expanded "><a href="document.html"><strong aria-hidden="true">4.</strong> 数据操作</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="crud.html"><strong aria-hidden="true">4.1.</strong> CRUD</a></li><li class="chapter-item expanded "><a href="search.html"><strong aria-hidden="true">4.2.</strong> 搜索</a></li><li class="chapter-item expanded "><a href="aggregation.html"><strong aria-hidden="true">4.3.</strong> 聚合</a></li><li class="chapter-item expanded "><a href="vector.html"><strong aria-hidden="true">4.4.</strong> 向量</a></li></ol></li><li class="chapter-item expanded "><a href="design.html"><strong aria-hidden="true">5.</strong> 设计</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="architecture.html"><strong aria-hidden="true">5.1.</strong> 架构</a></li><li class="chapter-item expanded "><a href="plan.html"><strong aria-hidden="true">5.2.</strong> 计划</a></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                        
+                    </div>
+
+                    <h1 class="menu-title">chubaodb 白皮书</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        
+                    </div>
+                </div>
+
+                
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" name="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h3><a class="header" href="#介绍" id="介绍">介绍</a></h3>
+<p><code>chubaodb</code> 是一个分布式高可用的云原生，同时支持传统的分布式文档搜索及存储系统，支持<code>全文检索</code>,<code>聚合查询</code>,<code>向量搜索</code>,<code>标量搜索</code>的功能，采用轻schema策略，尽可能提高了存储文档的灵活度。同时吸取其他类似软件的经验，初心于在有限的计算节点情况下，支持不限容量的存储及计算，同时尽可能低的学习成本，完成尽可能多的需求。</p>
+<h3><a class="header" href="#初心" id="初心">初心</a></h3>
+<p>我们期望于<code>chubaodb</code> 是一个一看就会，开箱即用的软件，让使用者不在对被使用的软件所使用。严格准守，山寨三体的软件设计原则， </p>
+<ul>
+<li>1.程序必须正确 </li>
+<li>2.程序必须可维护，如果和第1条冲突，以第1条为准 </li>
+<li>3.程序必须高效，如和第1条冲突，则以第1条为准，如和第2条冲突，则以第2条为准。</li>
+</ul>
+<h3><a class="header" href="#特点" id="特点">特点</a></h3>
+<ul>
+<li><code>graphql</code> 进行schema管理， </li>
+<li><code>restful api</code>进行数据操作， </li>
+<li><code>raft</code>保证数据的最终一致性， </li>
+<li><code>rocksdb</code>, <code>tantivy</code>， <code>faiss</code> 提供了底层存储及计算的能力。</li>
+<li>通过<code>chubaofs</code> 提供了无限存储的可能，通过架构可以释放或加载宝贵的cpu和内存资源。</li>
+</ul>
+<h1><a class="header" href="#编译与安装" id="编译与安装">编译与安装</a></h1>
+<p><code>chubaodb</code>采用rust编写同时可能会依赖一些c库，支持跨平台编译，目前支持操作系统有 windows , linux , macos.可能还有其他不知道的，碰到再说。</p>
+<table><thead><tr><th>共功能\系统</th><th>windows</th><th>linux</th><th>macos</th></tr></thead><tbody>
+<tr><td>存储</td><td>支持</td><td>支持</td><td>支持</td></tr>
+<tr><td>全文检索</td><td>支持</td><td>支持</td><td>支持</td></tr>
+<tr><td>向量检索</td><td><code>不支持</code></td><td>支持</td><td>支持</td></tr>
+</tbody></table>
+<hr />
+<p><strong>重点</strong>: 如果你之前没有rust环境，且对rust 没什么兴趣直接下载我们的release 版本。 (TODO: release连接)，珍爱生命远离rust编译</p>
+<p><strong>开始编译以在macos 下编译为例</strong></p>
+<ul>
+<li>在项目根目录执行 <code>cargo build --release</code> ，</li>
+<li>如果运气好没有报错，那么进入 <code>target/release</code> 目录获得编译好的二进制文件 <code>chubaodb</code></li>
+<li>执行 ./chubaodb </li>
+<li>打开浏览器访问 http://127.0.0.1:8080 为router地址， 这个地址用来对数据进行CRUD</li>
+<li>打开浏览器访问 http://127.0.0.1:7070 为master地址， 这个地址用来对库表及数据结构进行管理。</li>
+<li>之后的章节会详细介绍这些地址的用法，如果一切顺利恭喜你，chubaodb已经在你的电脑中完美运行了。</li>
+</ul>
+<h1><a class="header" href="#配置文件" id="配置文件">配置文件</a></h1>
+<p>前面我们已经学会了，如果以最基本的方式启动chubaodb。下面我们来学一种非常高级的用法，通过配置文件和启动参数来启动chubaodb。在学这个之前我们可能需要了简单解下chubaodb的架构，chubaodb份了三个角色<code>master</code>,<code>pserver</code>,<code>router</code>.</p>
+<ul>
+<li>master 是集群管理，元数据管理的模块。表结构，数据均衡，failover 等</li>
+<li>pserver 是数据存储及计算节点。</li>
+<li>router 是提供了restful的数据查询组件。router 是无状态的。</li>
+</ul>
+<p>下面是一个简单的config例子。也是默认config的参数</p>
+<pre><code>[global]
+# the name will validate join cluster by same name
+name = &quot;chubaodb&quot;
+# your server ip for connect, you can use -i in rags to set it
+# ip = &quot;127.0.0.1&quot;
+# log path , If you are in a production environment, You'd better set absolute paths
+log = &quot;logs/&quot;
+# default log type for any model
+log_level = &quot;info&quot;
+# log file size for rolling
+log_limit_bytes = 128000000
+# number of reserved log files
+log_file_count = 10
+# Whether to use distributed storage. If it's true, there's only one
+shared_disk = false
+
+[router]
+# port for server
+http_port = 8080
+
+[ps]
+#set zone num, default is 0
+zone = &quot;default&quot;
+# you data save to disk path ,If you are in a production environment, You'd better set absolute paths
+data = &quot;data/&quot;
+# port for server
+rpc_port = 9090
+# how often to refresh the index
+flush_sleep_sec = 3
+    [ps.raft]
+        heartbeat_port = 10030
+        replicate_port = 10031
+        # how size of num for memory
+        log_max_num = 200000
+        # how size of num for memory
+        log_min_num = 100000
+        # how size of num for memory
+        log_file_size_mb = 128
+        # Three  without a heartbeat , follower to begin consecutive elections
+        heartbeate_ms = 500
+    
+
+[[masters]]
+# master ip for service
+ip = &quot;127.0.0.1&quot;
+# port for server
+http_port = 7070
+# master data path for meta
+data = &quot;data/meta/&quot;
+</code></pre>
+<p>可以发现我们把 三个模块写到了同一个配置文件。同时各个节点通过参数来选择启动的模块。实现了一个配置文件走天下的易用功能。</p>
+<p>可以通过 <code>./chubaodb --help</code> 获得参数说明</p>
+<pre><code>(base) ➜  release git:(async-std) ✗ ./chubaodb --help
+chubaodb 0.1.0
+hello index world
+
+USAGE:
+    chubaodb [SUBCOMMAND]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    all       
+    help      Prints this message or the help of the given subcommand(s)
+    master    
+    ps        
+    router   
+</code></pre>
+<p>启动可以通过 <code>./chubaodb all --help </code> , <code>./chubaodb ps --help </code> .....来获取更多。参数说明</p>
+<ul>
+<li>比如我们想把三个模块在一个进程中启动 那么就是. <code>./chubaodb all -c ../../config/config.toml</code> .</li>
+</ul>
+<pre><code>./chubaodb all -c ../../config/config.toml
+load config by path: ../../config/config.toml
+2020-07-15 11:05:39 - INFO - chubaodb::util::config(189) - log init ok 
+2020-07-15 11:05:39 - INFO - chubaodb(149) - All ChubaoDB servers were started successfully!
+2020-07-15 11:05:39 - INFO - chubaodb::router::server(29) - router is listening on http://0.0.0.0:8080
+2020-07-15 11:05:39 - INFO - actix_server::builder(262) - Starting 8 workers
+2020-07-15 11:05:39 - INFO - chubaodb::util::http_client(21) - send get for url:http://127.0.0.1:7070/my_ip
+2020-07-15 11:05:39 - INFO - surf::middleware::logger::native(119) - sending request
+2020-07-15 11:05:39 - INFO - actix_server::builder(276) - Starting &quot;actix-web-service-0.0.0.0:8080&quot; service on 0.0.0.0:8080
+2020-07-15 11:05:39 - WARN - isahc::handler(209) - request completed with error [id=AtomicCell { value: 0 }]: ConnectFailed: failed to connect to the server
+2020-07-15 11:05:39 - ERROR - chubaodb::pserver::server(41) - got ip from master has err:Error(InternalErr, &quot;ConnectFailed: failed to connect to the server&quot;)
+2020-07-15 11:05:39 - INFO - chubaodb::master::server(43) - master listening on http://0.0.0.0:7070
+2020-07-15 11:05:39 - INFO - actix_server::builder(262) - Starting 8 workers
+2020-07-15 11:05:39 - INFO - actix_server::builder(276) - Starting &quot;actix-web-service-0.0.0.0:7070&quot; service on 0.0.0.0:7070
+2020-07-15 11:05:40 - INFO - chubaodb::util::http_client(21) - send get for url:http://127.0.0.1:7070/my_ip
+2020-07-15 11:05:40 - INFO - surf::middleware::logger::native(119) - sending request
+2020-07-15 11:05:40 - INFO - chubaodb::master::server(440) - success_response [Object({&quot;ip&quot;: String(&quot;127.0.0.1&quot;)})]
+2020-07-15 11:05:40 - INFO - surf::middleware::logger::native(119) - request completed
+2020-07-15 11:05:40 - INFO - chubaodb::pserver::server(36) - got my ip:127.0.0.1 from master
+2020-07-15 11:05:40 - INFO - chubaodb::util::http_client(51) - send post for url:http://127.0.0.1:7070/pserver/register
+2020-07-15 11:05:40 - INFO - surf::middleware::logger::native(119) - sending request
+2020-07-15 11:05:40 - INFO - chubaodb::master::server(301) - prepare to heartbeat with address 127.0.0.1:9090, zone default
+2020-07-15 11:05:40 - INFO - chubaodb::master::server(440) - success_response [PServer { id: Some(1), addr: &quot;127.0.0.1:9090&quot;, write_partitions: [], zone: &quot;default&quot;, modify_time: 0 }]
+2020-07-15 11:05:40 - INFO - surf::middleware::logger::native(119) - request completed
+2020-07-15 11:05:40 - INFO - chubaodb::pserver::service(111) - register to master ok: node_id:Some(1) 
+2020-07-15 11:05:40 - INFO - chubaodb::pserver::service(126) - register server line:PServer { id: Some(1), addr: &quot;127.0.0.1:9090&quot;, write_partitions: [], zone: &quot;default&quot;, modify_time: 0 }
+2020-07-15 11:05:40 - INFO - chubaodb::pserver::server(59) - init pserver OK use time:Ok(5.333ms)
+</code></pre>
+<ul>
+<li>比如我们只启动 router 那么就是. <code>./chubaodb router -c ../../config/config.toml</code> .</li>
+</ul>
+<pre><code>(base) ➜  release git:(async-std) ✗ ./chubaodb router -c ../../config/config.toml
+load config by path: ../../config/config.toml
+2020-07-15 11:01:59 - INFO - chubaodb::util::config(189) - log init ok 
+2020-07-15 11:01:59 - INFO - chubaodb(149) - All ChubaoDB servers were started successfully!
+2020-07-15 11:01:59 - INFO - chubaodb::router::server(29) - router is listening on http://0.0.0.0:8080
+2020-07-15 11:01:59 - INFO - actix_server::builder(262) - Starting 8 workers
+2020-07-15 11:01:59 - INFO - actix_server::builder(276) - Starting &quot;actix-web-service-0.0.0.0:8080&quot; service on 0.0.0.0:8080
+</code></pre>
+<ul>
+<li>比如我们只启动 master 那么就是. <code>./chubaodb master -c ../../config/config.toml</code> .</li>
+</ul>
+<pre><code>load config by path: ../../config/config.toml
+2020-07-15 11:03:11 - INFO - chubaodb::util::config(189) - log init ok 
+2020-07-15 11:03:11 - INFO - chubaodb(149) - All ChubaoDB servers were started successfully!
+2020-07-15 11:03:11 - INFO - chubaodb::master::server(43) - master listening on http://0.0.0.0:7070
+2020-07-15 11:03:11 - INFO - actix_server::builder(262) - Starting 8 workers
+2020-07-15 11:03:11 - INFO - actix_server::builder(276) - Starting &quot;actix-web-service-0.0.0.0:7070&quot; service on 0.0.0.0:7070
+^C2020-07-15 11:03:12 - INFO - actix_server::builder(321) - SIGINT received, exiting
+</code></pre>
+<ul>
+<li>比如我们只启动 pserver 那么就是. <code>./chubaodb ps -c ../../config/config.toml</code> . ps会通过你配置文件中master的配置自动去master 注册为数据节点</li>
+</ul>
+<pre><code>load config by path: ../../config/config.toml
+2020-07-15 11:03:45 - INFO - chubaodb::util::config(189) - log init ok 
+2020-07-15 11:03:45 - INFO - chubaodb(149) - All ChubaoDB servers were started successfully!
+2020-07-15 11:03:45 - INFO - chubaodb::util::http_client(21) - send get for url:http://127.0.0.1:7070/my_ip
+2020-07-15 11:03:45 - INFO - surf::middleware::logger::native(119) - sending request
+2020-07-15 11:03:45 - WARN - isahc::handler(209) - request completed with error [id=AtomicCell { value: 0 }]: ConnectFailed: failed to connect to the server
+</code></pre>
+<h1><a class="header" href="#集群模式" id="集群模式">集群模式</a></h1>
+<p>编造ing......</p>
+<h1><a class="header" href="#元数据管理" id="元数据管理">元数据管理</a></h1>
+<p>元数据管理是在master api上，提供了graphql的方式。同时内置了一个iql。如果你没有对配置做过更改，master 的地址应该为 http://127.0.0.1:7070</p>
+<p>打开地址你就看到如下</p>
+<p><img src="image/image-20200715111140350.png" alt="image-20200715111140350" /></p>
+<p>熟悉iql的就不解释了，不熟悉的用用就差不多。</p>
+<p>我们简单说一下各个接口的功能，以collectionGet 为例，这个接口是获取一个表的结构， 点击右侧第二个方法。可以看到需要的参数</p>
+<p><img src="image/image-20200715111454748.png" alt="image-20200715111454748" /></p>
+<p>参数为，id ，name 。类型后门没有跟<code>!</code>意思就非必须字段。但是必须二选一。意味着你可以通过一个name 或者id 去查询这个collection.然后我们输入query</p>
+<pre><code>{
+  collectionGet(name:&quot;t1&quot;)
+}
+</code></pre>
+<p><img src="image/image-20200715111749876.png" alt="image-20200715111749876" /></p>
+<p>可以看到报错了。没错。就是错了。因为我没还没有创建名字为<code>t1</code>的collection。后门会有创建的方式。那我们换一个简单的的吧。我们通过query来查询当前系统的版本。</p>
+<p><img src="image/image-20200715111932528.png" alt="image-20200715111932528" /></p>
+<p>红色部分为返回结果。太过简单就不解释了。</p>
+<h1><a class="header" href="#库表管理" id="库表管理">库表管理</a></h1>
+<p>下面我们会对<code>创建表</code>,<code>查询表</code>，<code>删除表</code> 进行演示。目前表结构一旦创建不支持修改。
+打开master的管理地址 http://127.0.0.1:7070</p>
+<h3><a class="header" href="#创建表" id="创建表">创建表</a></h3>
+<p>通过 <code>collectionCreate</code>接口进行创建</p>
+<p><img src="image/image-20200715112907536.png" alt="image-20200715112907536" /></p>
+<ul>
+<li>Name 是表名称， </li>
+<li>partitionNum 是这个表分多少个分片。分片多会提高插入的并发能力，但是会降低搜索效率，并非越多或者越少越好</li>
+<li>partitionReplicaNum 是每个分片多少个副本。建议要么1，要么3+ 。在传统分布式系统环境，可以设置为3，单机版智能设置1.partitionReplicaNum 必须小于等于你的机器个数</li>
+<li>Fields 是这个表里面的字段。我们提供了 <code>int</code>, <code>float</code>, <code>string</code>, <code>text</code>, <code>vector</code>, <code>date</code> 几种字段格式，注意 text 和string的区别是。text是全文检索，比如 <code>中国银行</code> 搜索<code>中国</code>是会被召回的， <code>string</code>的话必须输入完整的 匹配。</li>
+</ul>
+<p>下面我们创建一个人物表，包含 <code>ID</code>， <code>姓名</code>， <code>年龄</code> ，<code>生日</code> ， <code>简介</code> ，<code>技能</code> 几个字段，</p>
+<pre><code>mutation{
+  collectionCreate(
+    name:&quot;person&quot;, 
+    partitionNum:1, 
+    partitionReplicaNum:1
+  	fields:{
+      int:[{name:&quot;age&quot;, value:true }]
+      string:[{name:&quot;name&quot; }, {name:&quot;skills&quot;, value:true, array:true}]
+      date:[{name:&quot;birthday&quot;, value:true }]
+      text:[{name:&quot;description&quot;}]
+    }
+  
+  )
+}
+</code></pre>
+<p><img src="image/image-20200715115437856.png" alt="image-20200715115437856" /></p>
+<p>出现如下结构意味着创建表成功了。每种类型有自己的参数大家可以参阅iql的文档。</p>
+<h3><a class="header" href="#查询表" id="查询表">查询表</a></h3>
+<p><img src="image/image-20200715115617185.png" alt="image-20200715115617185" /></p>
+<p>删除表</p>
+<p><img src="image/image-20200715115703796.png" alt="image-20200715115703796" /></p>
+<p>ok 你已经具备了元数据管理的基本技能。</p>
+<h1><a class="header" href="#数据操作" id="数据操作">数据操作</a></h1>
+<h1><a class="header" href="#crud那些事儿" id="crud那些事儿">crud那些事儿</a></h1>
+<p>在<a href="./collection.html">库表管理</a>里我们学习了如何创建一个表。下面让我们对这个表进行数据的增删改查。</p>
+<p>在这之前我们了解下插入数据的姿势。</p>
+<ul>
+<li><code>put</code> 代表不管有没有都插进去。document的version归为1</li>
+<li><code>create</code> 必须没有，如果有报错，document的version为1</li>
+<li><code>update</code> 必须存在，如果不存在就报错， document的version 递增+1</li>
+<li><code>upsert</code> 有则走<code>update</code>逻辑，没有则走<code>create</code>逻辑</li>
+</ul>
+<p>好了你已经学会了存储的真谛，让我们来试着插入一条数据吧！注意数据操作是在 router 上进行，也就是默认的<code>8080</code>端口上。</p>
+<h2><a class="header" href="#put" id="put">put</a></h2>
+<pre><code>curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;张三&quot;,
+	&quot;age&quot;: 20,
+	&quot;birthday&quot;: &quot;2000-02-02&quot;,
+	&quot;description&quot;: &quot;一个用来测试的倒霉蛋&quot;,
+	&quot;skills&quot;: [&quot;java&quot;, &quot;php&quot;, &quot;python&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/1&quot;
+</code></pre>
+<p>看到如下</p>
+<p><img src="image/image-20200715124902323.png" alt="image-20200715124902323" /></p>
+<p>代表插入成功！</p>
+<ul>
+<li><code>http://127.0.0.1:8080/put/person/1</code> 地址中<code>person</code> 是我们创建的表名称， 1 位当前用户的唯一id。字符串格式。（ps:id 还有一种方式，双keyid。这是一种很高级的做法，后门我们会对次情况单门一章来说明）</li>
+</ul>
+<p>我们可以通过get 接口来获取这条数据 http://127.0.0.1:8080/get/person/1</p>
+<p><img src="image/image-20200715125145828.png" alt="image-20200715125145828" /></p>
+<h2><a class="header" href="#update" id="update">update</a></h2>
+<p>比如我们尝试更新张三的技能增加rust 通过如下方式</p>
+<pre><code>curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;skills&quot;: [&quot;java&quot;, &quot;php&quot;, &quot;python&quot;,&quot;rust&quot;]
+}
+' &quot;http://127.0.0.1:8080/update/person/1&quot;
+</code></pre>
+<p><img src="image/image-20200715125335276.png" alt="image-20200715125335276" /></p>
+<p>我们可以开心的看到张三学会了<code>rust</code> 并且 version 改为了2.</p>
+<h2><a class="header" href="#delete" id="delete">delete</a></h2>
+<p>通过 </p>
+<pre><code>curl -XDELETE http://127.0.0.1:8080/delete/person/1
+{&quot;code&quot;:200,&quot;message&quot;:&quot;success&quot;}
+</code></pre>
+<p>可以删除张三这条记录。我们看看删除后再做get会得到什么</p>
+<p><img src="image/image-20200715125658865.png" alt="image-20200715125658865" /></p>
+<p>嗯。很好本章结束了！</p>
+<h1><a class="header" href="#搜索那些事儿" id="搜索那些事儿">搜索那些事儿</a></h1>
+<p>下面我们来介绍一下chubaodb的搜索功能，在这之前，你确信已经通过<a href="*./collection.html">库表管理</a>创建了表。</p>
+<p>我们先插入一些测试数据吧，先创建5个人</p>
+<pre><code>curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;张三&quot;,
+	&quot;age&quot;: 20,
+	&quot;birthday&quot;: &quot;2000-02-02&quot;,
+	&quot;description&quot;: &quot;zhangsan can use java good at php, but python not good at&quot;,
+	&quot;skills&quot;: [&quot;java&quot;, &quot;php&quot;, &quot;python&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/1&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;李四&quot;,
+	&quot;age&quot;: 30,
+	&quot;birthday&quot;: &quot;1990-02-02&quot;,
+	&quot;description&quot;: &quot;lisi can use java ,only java&quot;,
+	&quot;skills&quot;: [&quot;java&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/2&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;王五&quot;,
+	&quot;age&quot;: 20,
+	&quot;birthday&quot;: &quot;2000-03-20&quot;,
+	&quot;description&quot;: &quot;wangwu is c++ rust good at!&quot;,
+	&quot;skills&quot;: [&quot;c++&quot;, &quot;rust&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/3&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;牛六&quot;,
+	&quot;age&quot;: 35,
+	&quot;birthday&quot;: &quot;1985-12-02&quot;,
+	&quot;description&quot;: &quot;niuliu age too old&quot;,
+	&quot;skills&quot;: [&quot;java&quot;, &quot;golang&quot;, &quot;python&quot;, &quot;rust&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/4&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;赵七&quot;,
+	&quot;age&quot;: 18,
+	&quot;birthday&quot;: &quot;2002-03-12&quot;,
+	&quot;description&quot;: &quot;is a web user, he can use ruby and php&quot;,
+	&quot;skills&quot;: [&quot;php&quot;, &quot;ruby&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/5&quot;
+</code></pre>
+<p>插入完成后，我们通过search接口可以查看到这五个人 <code>http://127.0.0.1:8080/search/person</code></p>
+<p><img src="image/image-20200715134112636.png" alt="image-20200715134112636" /></p>
+<p>http://127.0.0.1:8080/search/person` 参数为空时语义为query:* search 又如下参数</p>
+<ul>
+<li>query 查询语句，也就是类似lucene 的dsl 。（TODO： 专门一章介绍dsl）</li>
+<li>def_fields 默认查询字段。当query不指定字段时候以此字段为查询，为or的关系，可以多个字段用逗号<code>,</code>隔开</li>
+<li>size: 返回数据条数，默认为20</li>
+<li>sort: 排序规则 example：<em>name:asc|age:desc</em> , 默认为score排序也就是相关度</li>
+</ul>
+<p>下面我们把这些query 都用上做一个查询吧！</p>
+<p><code>http://127.0.0.1:8080/search/person?query=name:%E5%BC%A0%E4%B8%89&amp;size=3&amp;sort=age:asc</code></p>
+<p><img src="image/image-20200715134143880.png" alt="image-20200715134143880" /></p>
+<p>下面让我们自举一些需求。</p>
+<p>查找摘要中 包含 rust 或者 java 的人 </p>
+<ul>
+<li><code>http://127.0.0.1:8080/search/person?query=description:java%20OR%20description:rust&amp;size=3&amp;sort=age:asc</code></li>
+<li>上述语句等同于 <code>http://127.0.0.1:8080/search/person?query=java%20OR%20rust&amp;def_fields=description&amp;size=3&amp;sort=age:asc</code></li>
+</ul>
+<p><img src="image/image-20200715134337378.png" alt="image-20200715134337378" /></p>
+<p>查找摘要中 包含  java 的人  按照年龄倒序</p>
+<pre><code>http://127.0.0.1:8080/search/person?query=java&amp;def_fields=description&amp;size=3&amp;sort=age:desc
+</code></pre>
+<p><img src="image/image-20200715134556712.png" alt="image-20200715134556712" /></p>
+<h3><a class="header" href="#精确查找" id="精确查找">精确查找</a></h3>
+<p>在用户名或者摘要中查找 <code>web user</code> 为关键字的用户。</p>
+<p><img src="image/image-20200715134811989.png" alt="image-20200715134811989" /></p>
+<h1><a class="header" href="#聚合那些事儿" id="聚合那些事儿">聚合那些事儿</a></h1>
+<p>下面我们来介绍一下chubaodb的聚合功能，在这之前，你确信已经通过<a href="*./collection.html">库表管理</a>创建了表。</p>
+<p>我们先插入一些测试数据吧，先创建5个人</p>
+<pre><code>curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;张三&quot;,
+	&quot;age&quot;: 20,
+	&quot;birthday&quot;: &quot;2000-02-02&quot;,
+	&quot;description&quot;: &quot;zhangsan can use java good at php, but python not good at&quot;,
+	&quot;skills&quot;: [&quot;java&quot;, &quot;php&quot;, &quot;python&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/1&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;李四&quot;,
+	&quot;age&quot;: 30,
+	&quot;birthday&quot;: &quot;1990-02-02&quot;,
+	&quot;description&quot;: &quot;lisi can use java ,only java&quot;,
+	&quot;skills&quot;: [&quot;java&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/2&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;王五&quot;,
+	&quot;age&quot;: 20,
+	&quot;birthday&quot;: &quot;2000-03-20&quot;,
+	&quot;description&quot;: &quot;wangwu is c++ rust good at!&quot;,
+	&quot;skills&quot;: [&quot;c++&quot;, &quot;rust&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/3&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;牛六&quot;,
+	&quot;age&quot;: 35,
+	&quot;birthday&quot;: &quot;1985-12-02&quot;,
+	&quot;description&quot;: &quot;niuliu age too old&quot;,
+	&quot;skills&quot;: [&quot;java&quot;, &quot;golang&quot;, &quot;python&quot;, &quot;rust&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/4&quot;
+
+curl -H &quot;Content-Type: application/json&quot; -XPOST -d'
+{
+	&quot;name&quot;: &quot;赵七&quot;,
+	&quot;age&quot;: 18,
+	&quot;birthday&quot;: &quot;2002-03-12&quot;,
+	&quot;description&quot;: &quot;is a web user, he can use ruby and php&quot;,
+	&quot;skills&quot;: [&quot;php&quot;, &quot;ruby&quot;]
+}
+' &quot;http://127.0.0.1:8080/put/person/5&quot;
+</code></pre>
+<p>插入完成后，我们通过search接口可以查看到这五个人 <code>http://127.0.0.1:8080/search/person</code></p>
+<p>我们先了解下聚合的真谛。 我们从一句大家都熟悉的sql 入手吧</p>
+<p><code>select age,count(age) from person group by age</code></p>
+<p>这个聚合函数可以堪称两个部分。分别是 <code>group by </code> 分组，和 <code>count(*)</code> 指标连个部分。所以聚合份两种，一个是分组，一个和统计。</p>
+<p>ok，现在让我们看看在<code>chubaodb</code>中这两部分是如何完成的。我们通过一个例子入手</p>
+<p><code>http://127.0.0.1:8080/agg/person?group=term(age)&amp;fun=stats(age)</code></p>
+<ul>
+<li>agg 是方法的操作</li>
+<li>group= 是聚合方法。例子中我们用的term 方式进行分组。</li>
+<li>fun = 是指标方法。例子中我们统计 max ，min 等</li>
+</ul>
+<p><img src="image/image-20200715135803824.png" alt="image-20200715135803824" /></p>
+<p>好的恭喜你已经看到结果了。默认是按照value中的count 进行排序</p>
+<h3><a class="header" href="#目前group-支持的方法有" id="目前group-支持的方法有">目前group 支持的方法有</a></h3>
+<p><code>term(name)</code> 按照字段进行聚合</p>
+<p><code>date(name,format)</code> example: date(birthday, yyyy-MM) 按照时间格式进行聚合</p>
+<p><code>range(name, range_str)</code> example:<em>range(age,-0,0-20,20-30,30-40,40-)</em></p>
+<h3><a class="header" href="#fun-支持的方法有" id="fun-支持的方法有">Fun 支持的方法有</a></h3>
+<p><code>hits(size)</code>:每个分组中返回size个文档，无排序功能</p>
+<p><code>stats(name)</code>: 每个分组中，count max, min , sum missing 的个数</p>
+<ul>
+<li>fun 可以为空，如果为空则默认为count方式</li>
+</ul>
+<p>现在让我们自举一些例子：</p>
+<h3><a class="header" href="#按照年龄分组分别显示每个年龄中的人" id="按照年龄分组分别显示每个年龄中的人">按照年龄分组，分别显示每个年龄中的人</a></h3>
+<p><img src="image/image-20200715140655966.png" alt="image-20200715140655966" /></p>
+<h3><a class="header" href="#照技能分组显示每个技能的人数" id="照技能分组显示每个技能的人数">照技能分组，显示每个技能的人数</a></h3>
+<p><code>http://127.0.0.1:8080/agg/person?group=term(skills)</code></p>
+<p><img src="image/image-20200715140812082.png" alt="image-20200715140812082" /></p>
+<h3><a class="header" href="#按照技能分组显示每个技能的人数按照技能名称排序" id="按照技能分组显示每个技能的人数按照技能名称排序">按照技能分组，显示每个技能的人数,按照技能名称排序</a></h3>
+<p><code>http://127.0.0.1:8080/agg/person?group=term(skills)&amp;sort=key:asc</code></p>
+<p><img src="image/image-20200715140902639.png" alt="image-20200715140902639" /></p>
+<h3><a class="header" href="#按照年龄和技能分组查看人数" id="按照年龄和技能分组查看人数">按照年龄和技能分组查看人数</a></h3>
+<p><img src="image/image-20200715141018443.png" alt="image-20200715141018443" /></p>
+<h1><a class="header" href="#向量那些事儿" id="向量那些事儿">向量那些事儿</a></h1>
+<h1><a class="header" href="#设计" id="设计">设计</a></h1>
+<h1><a class="header" href="#关于架构" id="关于架构">关于架构</a></h1>
+<h1><a class="header" href="#计划" id="计划">计划</a></h1>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                        
+
+                        
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                
+
+                
+            </nav>
+
+        </div>
+
+        
+
+        
+
+        
+
+        
+        <script type="text/javascript">
+            window.playground_copyable = true;
+        </script>
+        
+
+        
+
+        
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        
+
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+        
+
+        
+        
+        <script type="text/javascript">
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+        
+        
+
+    </body>
+</html>
