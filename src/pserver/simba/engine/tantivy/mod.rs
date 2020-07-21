@@ -282,6 +282,9 @@ impl Tantivy {
                 .collect(),
         );
         let size = sdr.size as usize;
+        if size == 0 {
+            return result!(Code::ParamError, "query size can not to zero");
+        }
         let q = conver(query_parser.parse_query(sdr.query.as_str()))?;
 
         let sort_len = sdr.sort.len() > 0;
