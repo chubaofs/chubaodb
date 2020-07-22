@@ -299,70 +299,34 @@ impl Field {
     }
 
     fn validate_field(&self, v: &Value) -> ASResult<()> {
-        match self {
-            Field::int(f) => {
-                if !v.is_i64() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect int but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
+        use chrono::prelude::NaiveDateTime;
+        use std::convert::TryInto;
+        let err = match self {
+            Field::int(_) => {
+                let v: ASResult<i64> = crate::util::convert::json(v)?.try_into();
+                v.err()
             }
-            Field::float(f) => {
-                if !v.is_f64() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect float but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
+            Field::float(_) => {
+                let v: ASResult<f64> = crate::util::convert::json(v)?.try_into();
+                v.err()
             }
-            Field::string(f) => {
-                if !v.is_string() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect string but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
-            }
-            Field::text(f) => {
-                if !v.is_string() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect text but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
-            }
-            Field::bytes(f) => {
-                if !v.is_string() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect text but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
-            }
-            Field::date(f) => {
-                if !v.is_number() && !v.is_string() {
-                    return result!(
-                        Code::FieldTypeErr,
-                        "field:{} expect date but found:{:?} ",
-                        f.name,
-                        v,
-                    );
-                }
+            Field::date(_) => {
+                let v: ASResult<NaiveDateTime> = crate::util::convert::json(v)?.try_into();
+                v.err()
             }
             Field::vector(_) => {
                 panic!("not vector field");
             }
+            _ => None,
+        };
+
+        if err.is_some() {
+            return result!(
+                Code::FieldTypeErr,
+                "field:{} value:{:?} can not cast",
+                self.name(),
+                v,
+            );
         }
         Ok(())
     }
@@ -394,8 +358,90 @@ pub struct Collection {
     pub slots: Vec<u32>,
     pub status: CollectionStatus,
     pub modify_time: u64,
+    #[serde(skip)]
     pub vector_field_index: Vec<usize>,
+    #[serde(skip)]
     pub scalar_field_index: Vec<usize>,
+    #[serde(skip)]
+    pub field_map: HashMap<String, usize>,
+}
+
+impl Collection {
+    pub fn init(&mut self) {
+        let mut vector_index = Vec::new();
+        let mut scalar_index = Vec::new();
+        let mut field_map = HashMap::new();
+        for (i, f) in self.fields.iter_mut().enumerate() {
+            if f.is_vector() {
+                vector_index.push(i);
+            } else {
+                scalar_index.push(i);
+            }
+            field_map.insert(f.name().to_string(), i);
+        }
+
+        self.vector_field_index = vector_index;
+        self.scalar_field_index = scalar_index;
+        self.field_map = field_map;
+    }
+
+    pub fn validate(&self) -> ASResult<()> {
+        if self.partition_num <= 0 {
+            return result!(
+                Code::ParamError,
+                "partition_num:{} is invalid",
+                self.partition_num
+            );
+        }
+        if self.partition_replica_num == 0 {
+            return result!(
+                Code::ParamError,
+                "partition_replica_num:{} is invalid",
+                self.partition_replica_num
+            );
+        }
+
+        for f in self.fields.iter() {
+            let name = f.name();
+
+            if name.is_empty() {
+                return result!(Code::ParamError, "field name can not be empty:{:?}", f);
+            }
+
+            Self::name_validate(name)?;
+        }
+        Ok(())
+    }
+
+    const NAME_KEYWORD: [&'static str; 19] = [
+        " ", "+", "-", "&", "|", "!", "(", ")", "{", "}", "[", "]", "^", "\"", "~", "*", "?", ":",
+        "\\",
+    ];
+
+    fn name_validate(name: &str) -> ASResult<()> {
+        if name.len() == 0 {
+            return result!(Code::ParamError, "field name is empty");
+        }
+
+        if name.as_bytes()[0] == '_' as u8 {
+            return result!(
+                Code::ParamError,
+                "field name:[{}] can not start with `_`",
+                name,
+            );
+        }
+        for v in Self::NAME_KEYWORD.iter() {
+            if name.contains(v) {
+                return result!(
+                    Code::ParamError,
+                    "field name:[{}] can not contains:[{}] ",
+                    name,
+                    v
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -679,4 +725,12 @@ pub mod entity_key {
     pub fn lock(key: &str) -> String {
         format!("META/LOCK/{}", key)
     }
+}
+
+#[test]
+fn test_name_validate() {
+    Collection::name_validate("name_value_abc").unwrap();
+    assert_eq!(true, Collection::name_validate("name_value-abc").is_err());
+    assert_eq!(true, Collection::name_validate("_name_value-abc").is_err());
+    assert_eq!(true, Collection::name_validate("_name_value abc").is_err());
 }

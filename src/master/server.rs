@@ -134,32 +134,6 @@ async fn create_collection(rs: web::Data<Arc<MasterService>>, info: web::Bytes) 
         }
     };
 
-    if info.name == "" {
-        info!("collection name is none");
-        return HttpResponse::build(Code::InternalErr.http_code())
-            .body(err_def!("collection name is none").to_json());
-    }
-
-    if info.partition_num <= 0 {
-        info!("partition_num:{} is invalid", info.partition_num);
-        return HttpResponse::build(Code::InternalErr.http_code())
-            .body(err_def!("partition_num:{} is invalid", info.partition_num).to_json());
-    }
-
-    if info.partition_replica_num == 0 {
-        info!(
-            "partition_replica_num:{} is invalid",
-            info.partition_replica_num
-        );
-        return HttpResponse::build(Code::InternalErr.http_code()).body(
-            err_def!(
-                "partition_replica_num:{} is invalid",
-                info.partition_replica_num
-            )
-            .to_json(),
-        );
-    }
-
     let name = info.name.clone();
     info!("prepare to create collection with name {}", name);
     match rs.create_collection(info).await {

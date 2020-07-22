@@ -75,8 +75,9 @@ impl MetaClient {
 
     pub async fn get_collection(&self, name: &str) -> ASResult<Collection> {
         let url = format!("http://{}/collection/get/{}", self.conf.master_addr(), name);
-
-        http_client::get_json(&url, DEF_TIME_OUT).await
+        let mut collection: Collection = http_client::get_json(&url, DEF_TIME_OUT).await?;
+        collection.init();
+        Ok(collection)
     }
 
     pub async fn get_collection_by_id(&self, collection_id: u32) -> ASResult<Collection> {
@@ -86,7 +87,9 @@ impl MetaClient {
             collection_id,
         );
 
-        http_client::get_json(&url, DEF_TIME_OUT).await
+        let mut collection: Collection = http_client::get_json(&url, DEF_TIME_OUT).await?;
+        collection.init();
+        Ok(collection)
     }
 
     pub async fn get_server_addr_by_id(&self, server_id: u64) -> ASResult<String> {

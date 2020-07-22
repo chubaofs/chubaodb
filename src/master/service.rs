@@ -71,21 +71,7 @@ impl MasterService {
         info!("begin to create collection");
         let _lock = self.collection_lock.lock().await;
 
-        if collection.name == "" {
-            return result_def!("collection name is none");
-        }
-
-        if collection.partition_num <= 0 {
-            error!("partition_num:{} is invalid", collection.partition_num);
-            return result_def!("partition_num:{} is invalid", collection.partition_num);
-        }
-
-        if collection.partition_replica_num == 0 {
-            return result_def!(
-                "partition_replica_num:{} is invalid",
-                collection.partition_replica_num
-            );
-        }
+        collection.validate()?;
 
         //check collection exists
         match self.get_collection(&collection.name) {
@@ -106,24 +92,10 @@ impl MasterService {
         let seq = self.meta_service.increase_id(entity_key::SEQ_COLLECTION)?;
 
         info!("no coresponding collection found, begin to create connection ");
-        let mut vector_index = Vec::new();
-        let mut scalar_index = Vec::new();
-        if collection.fields.len() > 0 {
-            for (i, f) in collection.fields.iter_mut().enumerate() {
-                validate_and_set_field(f)?;
-                if f.is_vector() {
-                    vector_index.push(i);
-                } else {
-                    scalar_index.push(i)
-                }
-            }
-        }
         info!("all fields valid.");
         collection.id = seq;
         collection.status = CollectionStatus::CREATING;
         collection.modify_time = current_millis();
-        collection.vector_field_index = vector_index;
-        collection.scalar_field_index = scalar_index;
 
         let partition_num = collection.partition_num;
 
@@ -523,14 +495,6 @@ impl MasterService {
         }
         self.meta_service.put(&partition)
     }
-}
-
-fn validate_and_set_field(field: &mut Field) -> ASResult<()> {
-    if field.name().trim() == "" {
-        return result_def!("unset field name in field:{:?}", field);
-    }
-
-    Ok(())
 }
 
 #[test]

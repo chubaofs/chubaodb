@@ -655,3 +655,14 @@ impl Engine for Tantivy {
         }
     }
 }
+
+#[test]
+fn test_analyzer() {
+    use tantivy::tokenizer::*;
+    let tokenizer = TextAnalyzer::from(NgramTokenizer::new(1, 1, false));
+    let mut stream = tokenizer.token_stream("hello there 我爱北京天安门");
+
+    while let Some(v) = stream.next() {
+        println!("{:?}", v);
+    }
+}

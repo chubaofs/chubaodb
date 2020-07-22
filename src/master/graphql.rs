@@ -65,12 +65,8 @@ impl Mutation {
             fields: fs,
             partition_num: partition_num as u32,
             partition_replica_num: partition_replica_num as u32,
-            partitions: vec![],
-            slots: vec![],
             status: CollectionStatus::UNKNOW,
-            modify_time: 0,
-            vector_field_index: vec![],
-            scalar_field_index: vec![],
+            ..Default::default()
         };
 
         let v = serde_json::to_string(&info)?;

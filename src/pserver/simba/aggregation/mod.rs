@@ -250,12 +250,7 @@ pub fn make_vec(
     sort: &Vec<Order>,
     size: usize,
 ) -> ASResult<Vec<AggValues>> {
-    println!("==============={}", map.len());
-
-    let result = sort_and_resize(map.into_iter().map(|(_, v)| v).collect(), sort, size);
-
-    println!("==============={:?}", result);
-    result
+    sort_and_resize(map.into_iter().map(|(_, v)| v).collect(), sort, size)
 }
 
 fn sort_and_resize(
