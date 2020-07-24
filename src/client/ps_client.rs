@@ -77,6 +77,7 @@ impl PsClient {
                 }
                 Err(e) => {
                     if self.check_err_cache(i, collection_name.as_str(), &e) {
+                        error!("write document has err:[{:?}] , it will be retry!", e);
                         continue 'outer;
                     } else {
                         return Err(e);
@@ -134,6 +135,7 @@ impl PsClient {
                 }
                 Err(e) => {
                     if self.check_err_cache(i, collection_name.as_str(), &e) {
+                        error!("get document has err:[{:?}] , will may be retry!", e);
                         continue 'outer;
                     } else {
                         return Err(e);
@@ -444,7 +446,7 @@ impl PsClient {
             return Ok(c.clone());
         }
 
-        let collection = self.meta_cli.get_collection(name).await?;
+        let collection = self.meta_cli.collection_get(None, Some(name)).await?;
 
         let mut cache_field = HashMap::with_capacity(collection.fields.len());
 
@@ -456,7 +458,7 @@ impl PsClient {
         let mut partitions = Vec::new();
 
         for pid in collection.partitions.iter() {
-            let partition = self.meta_cli.get_partition(collection.id, *pid).await?;
+            let partition = self.meta_cli.partition_get(collection.id, *pid).await?;
             partitions.push(partition);
         }
 
@@ -478,7 +480,7 @@ impl PsClient {
             return false;
         }
         match e.code() {
-            Code::RocksDBNotFound => {
+            Code::Timeout | Code::PartitionNotFound => {
                 warn!("to remove cache by collection:{}", cname);
                 self.collection_cache.write().unwrap().remove(cname);
                 true

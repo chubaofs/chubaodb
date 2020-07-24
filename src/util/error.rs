@@ -11,29 +11,57 @@ pub type ASResult<T> = std::result::Result<T, ASError>;
 macro_rules! err {
     ($code:expr , $arg:expr) => {{
         use std::convert::TryFrom;
+        use log::log_enabled;
+        use log::Level::Debug;
         let code = match Code::try_from($code) {
             Ok(c) => c,
             Err(_) => Code::InvalidErr,
         };
-        ASError::Error(code, format!("{}", $arg))
+
+        if log_enabled!(Debug) {
+            ASError::Error(code, format!("{} trace:{:?}", $arg, backtrace::Backtrace::new()))
+        }else{
+            ASError::Error(code, format!("{}", $arg))
+        }
+
     }};
     ($code:expr , $($arg:tt)*) => {{
         use std::convert::TryFrom;
+        use log::log_enabled;
+        use log::Level::Debug;
         let code = match Code::try_from($code) {
             Ok(c) => c,
             Err(_) => Code::InvalidErr,
         };
-        ASError::Error(code, format!($($arg)*))
+        if log_enabled!(Debug) {
+            let msg = format!($($arg)*) ;
+            ASError::Error(code, format!("{} trace:{:?}", msg, backtrace::Backtrace::new()))
+        }else{
+            ASError::Error(code, format!($($arg)*))
+        }
     }};
 }
 
 #[macro_export]
 macro_rules! err_def {
     ($arg:expr) => {{
-        ASError::Error(Code::InternalErr, format!("{}", $arg))
+        use log::log_enabled;
+        use log::Level::Debug;
+        if log_enabled!(Debug) {
+            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", $arg, backtrace::Backtrace::new()))
+        }else{
+            ASError::Error(Code::InternalErr, format!("{}", $arg))
+        }
     }};
     ($($arg:tt)*) => {{
-        ASError::Error(Code::InternalErr, format!($($arg)*))
+        use log::log_enabled;
+        use log::Level::Debug;
+        if log_enabled!(Debug) {
+            let msg = format!($($arg)*) ;
+            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", msg, backtrace::Backtrace::new()))
+        }else{
+            ASError::Error(Code::InternalErr, format!($($arg)*))
+        }
     }};
 }
 
@@ -93,10 +121,13 @@ pub enum Code {
     RocksDBNotFound,
     AlreadyExists,
     VersionErr,
-    SpaceNoIndex,
+    PServerNotFound,
+    CollectionNoIndex,
+    CollectionNotFound,
     PartitionNotLeader,
     PartitionNotInit,
     PartitionLoadErr,
+    PartitionNotFound,
     FieldTypeErr,
     FieldValueErr,
     LockedAlready,
@@ -105,6 +136,7 @@ pub enum Code {
     EncodingErr,
     DencodingErr,
     Timeout,
+    DocumentNotFound,
 }
 
 impl Code {

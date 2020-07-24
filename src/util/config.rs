@@ -98,11 +98,13 @@ pub struct RaftConf {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Master {
+    pub node_id: u64,
     pub ip: String,
     pub http_port: u16,
     #[serde(default = "false_bool")]
     pub is_self: bool,
     pub data: String,
+    pub raft: RaftConf,
 }
 
 impl Config {
@@ -128,7 +130,7 @@ impl Config {
         // init log in
         let level = match self.global.log_level.to_uppercase().as_str() {
             "DEBUG" => {
-                std::env::set_var("RUST_LOG", "actix_web=info"); //FIXME: not worked
+                std::env::set_var("RUST_LOG", "actix_web=debug"); //FIXME: not worked
                 LevelFilter::Debug
             }
             "INFO" => LevelFilter::Info,
@@ -189,10 +191,10 @@ impl Config {
         info!("log init ok ");
     }
 
-    pub fn self_master(&self) -> Option<Master> {
+    pub fn self_master(&self) -> Option<&Master> {
         for m in self.masters.iter() {
             if m.is_self {
-                return Some(m.clone());
+                return Some(m);
             }
         }
         None
@@ -200,6 +202,13 @@ impl Config {
 
     pub fn master_addr(&self) -> String {
         return format!("{}:{}", self.masters[0].ip, self.masters[0].http_port);
+    }
+
+    pub fn master_http_addr(&self) -> String {
+        format!(
+            "http://{}:{}",
+            self.masters[0].ip, self.masters[0].http_port
+        )
     }
 }
 
@@ -216,7 +225,7 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 name: String::from("chubaodb"),
                 ip: String::from("127.0.0.1"),
                 log: String::from("log/"),
-                log_level: String::from("info"),
+                log_level: String::from("debug"),
                 log_limit_bytes: default_log_limit_bytes(),
                 log_file_count: default_log_file_count(),
                 shared_disk: true,
@@ -238,10 +247,19 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
             },
             router: Router { http_port: 8080 },
             masters: vec![Master {
+                node_id: 1,
                 ip: String::from("127.0.0.1"),
                 http_port: 7070,
                 is_self: true,
                 data: String::from("data/"),
+                raft: RaftConf {
+                    heartbeat_port: 22130,
+                    replicate_port: 22131,
+                    log_max_num: 20000,
+                    log_min_num: 10000,
+                    log_file_size_mb: 32,
+                    heartbeate_ms: 500,
+                },
             }],
         };
     }
@@ -271,4 +289,10 @@ fn empty_str() -> String {
 
 fn false_bool() -> bool {
     false
+}
+
+#[test]
+fn test_load_config() {
+    let config = load_config("config/config.toml", None);
+    assert_eq!(1, config.self_master().unwrap().node_id);
 }

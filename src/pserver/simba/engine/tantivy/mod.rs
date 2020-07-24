@@ -630,7 +630,7 @@ impl Tantivy {
 
     pub fn check_index(&self) -> ASResult<()> {
         if self.field_num <= 2 {
-            return result!(Code::SpaceNoIndex, "space no index");
+            return result!(Code::CollectionNoIndex, "space no index");
         }
         Ok(())
     }

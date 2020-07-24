@@ -14,5 +14,6 @@
 pub mod cmd;
 pub mod graphql;
 pub mod meta;
+// pub mod raft;
 pub mod server;
 pub mod service;

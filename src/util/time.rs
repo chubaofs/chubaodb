@@ -12,6 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::util::error::*;
+use crate::*;
 use chrono::prelude::*;
 
 pub fn current_millis() -> u64 {
@@ -40,10 +41,12 @@ pub fn format_str(s: &str) -> ASResult<NaiveDateTime> {
         _ => s.parse::<NaiveDateTime>(),
     } {
         Ok(d) => Ok(d.into()),
-        Err(e) => Err(ASError::Error(
+        Err(e) => result!(
             Code::FieldValueErr,
-            format!("{} can not parse to date, err:{}", s, e.to_string()),
-        )),
+            "{} can not parse to date, err:{}",
+            s,
+            e.to_string(),
+        ),
     }
 }
 

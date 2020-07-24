@@ -41,9 +41,23 @@ flush_sleep_sec = 3
     
 
 [[masters]]
+# unique id for master
+node_id = 1
 # master ip for service
 ip = "127.0.0.1"
 # port for server
 http_port = 7070
 # master data path for meta
 data = "data/meta/"
+    [masters.raft]
+        heartbeat_port = 20030
+        replicate_port = 20031
+        # how size of num for memory
+        log_max_num = 200000
+        # how size of num for memory
+        log_min_num = 100000
+        # how size of num for memory
+        log_file_size_mb = 128
+        # Three  without a heartbeat , follower to begin consecutive elections
+        heartbeate_ms = 500
+        

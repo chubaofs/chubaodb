@@ -114,12 +114,12 @@ impl Simba {
     fn get_by_key(&self, key: &Vec<u8>) -> ASResult<(Vec<u8>, Vec<u8>)> {
         let iid = match self.rocksdb.db.get(key).map_err(cast)? {
             Some(v) => v,
-            None => return result!(Code::RocksDBNotFound, "not found id by key:[{:?}]", key),
+            None => return result!(Code::DocumentNotFound, "not found id by key:[{:?}]", key),
         };
 
         match self.rocksdb.get_doc_by_id(&iid).map_err(cast)? {
             Some(v) => Ok((iid, v)),
-            None => result!(Code::RocksDBNotFound, "not found iid by key:[{:?}]", &iid),
+            None => result!(Code::DocumentNotFound, "not found iid by key:[{:?}]", &iid),
         }
     }
 
@@ -272,15 +272,13 @@ impl Simba {
     async fn _delete(&self, doc: Document, raft: Arc<Raft>) -> ASResult<()> {
         let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-
         let iid = match self.rocksdb.db.get(&key) {
             Ok(ov) => match ov {
                 Some(v) => v,
-                None => return result!(Code::RocksDBNotFound, "id:{:?} not found!", key,),
+                None => return result!(Code::DocumentNotFound, "id:{:?} not found!", key,),
             },
             Err(e) => return result_def!("get key has err:{}", e),
         };
-
         self.raft_write(Event::Delete(iid, key), raft).await
     }
 

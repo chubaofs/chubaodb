@@ -180,8 +180,8 @@ message PartitionRequest {
   uint32 partition_id = 1;
   uint32 collection_id = 2;
   bool readonly = 3;
-  // if version ==0 not check version .
-  uint64 version = 4;
+  // if term ==0 not check term .
+  uint64 term = 4;
   repeated ReplicaInfo replicas = 5;
 }
 

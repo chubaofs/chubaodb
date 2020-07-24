@@ -70,7 +70,7 @@ impl RocksDB {
     ) -> ASResult<Option<Vec<u8>>> {
         match self.db.get_cf(self.id_cf(), key) {
             Ok(v) => Ok(v),
-            Err(e) => result!(Code::RocksDBNotFound, "get id key:{:?} has err", e),
+            Err(e) => result!(Code::DocumentNotFound, "get id key:{:?} has err", e),
         }
     }
 

@@ -19,6 +19,7 @@ use async_graphql::{Enum, InputObject};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 
 pub const ID_BYTES: &'static str = "_iid_bytes";
 
@@ -444,13 +445,35 @@ impl Collection {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Partition {
     pub id: u32,
     pub collection_id: u32,
     pub leader: String,
-    pub version: u64,
+    pub term: AtomicU64, //the term for raft
     pub replicas: Vec<Replica>,
+}
+
+impl Partition {
+    pub fn load_term(&self) -> u64 {
+        self.term.load(SeqCst)
+    }
+
+    pub fn set_term(&self, term: u64) {
+        self.term.store(term, SeqCst);
+    }
+}
+
+impl Clone for Partition {
+    fn clone(&self) -> Self {
+        return Self {
+            id: self.id,
+            collection_id: self.collection_id,
+            leader: self.leader.clone(),
+            term: AtomicU64::new(self.load_term()),
+            replicas: self.replicas.clone(),
+        };
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -480,6 +503,8 @@ impl Partition {
 pub struct PServer {
     pub id: Option<u32>,
     pub addr: String,
+    pub raft_heart_addr: String,
+    pub raft_log_addr: String,
     #[serde(default)]
     pub write_partitions: Vec<Partition>,
     #[serde(default)]
@@ -489,12 +514,21 @@ pub struct PServer {
 }
 
 impl PServer {
-    pub fn new(zone: String, id: Option<u32>, addr: String) -> Self {
+    pub fn new(
+        zone: String,
+        id: Option<u32>,
+        ip: &str,
+        rpc_port: u16,
+        raft_heart_port: u16,
+        raft_log_port: u16,
+    ) -> Self {
         PServer {
             id: id,
             zone: zone,
             write_partitions: Vec::default(),
-            addr: addr,
+            addr: format!("{}:{}", ip, rpc_port),
+            raft_heart_addr: format!("{}:{}", ip, raft_heart_port),
+            raft_log_addr: format!("{}:{}", ip, raft_log_port),
             modify_time: 0,
         }
     }

@@ -43,7 +43,6 @@ def test_create_collection():
     response = requests.post(url, headers=headers, data=json.dumps(data))
     print("space_create---\n" + response.text)
     assert response.status_code == 200
-    time.sleep(5)  # TODO: FIX ME wait raft ok
 
 
 def test_put():

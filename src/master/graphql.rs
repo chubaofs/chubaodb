@@ -1,7 +1,7 @@
 use crate::master::service::MasterService;
 use crate::util::{config, entity::*};
 use async_graphql::*;
-use log::{error, info};
+use log::{error, info, warn};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -44,8 +44,65 @@ impl Fields {
 }
 
 pub struct Mutation;
+
 #[Object]
 impl Mutation {
+    async fn pserver_register(&self, ctx: &Context<'_>, json: JsonValue) -> FieldResult<JsonValue> {
+        let ps: PServer = serde_json::from_value(json.0)
+            .map_err(|e| FieldError(format!("unmarshal pserver has err:[{}]", e), None))?;
+
+        let (addr, zone) = (ps.addr.clone(), ps.zone.clone());
+
+        info!("prepare to heartbeat with address {}, zone {}", addr, zone);
+
+        let service = ctx.data_unchecked::<Arc<MasterService>>();
+        let mut ps = match service.register(ps) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    "get server failed, zone:{}, server_addr:{}, err:{}",
+                    addr,
+                    zone,
+                    e.to_string()
+                );
+                return Err(FieldError(
+                    format!(
+                        "pserver register failed, zone: {}, addr: {}, err: {}",
+                        addr, zone, e
+                    ),
+                    None,
+                ));
+            }
+        };
+
+        let mut active_ids = Vec::new();
+
+        for wp in ps.write_partitions {
+            match service.get_partition(wp.collection_id, wp.id) {
+                Ok(dbc) => {
+                    if dbc.leader == ps.addr && dbc.load_term() <= wp.load_term() {
+                        active_ids.push(dbc);
+                    } else {
+                        warn!(
+                            "partition not load because not expected:{:?} found:{:?}",
+                            dbc, wp
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "pserver for collection:{} partition:{} get has err:{:?}",
+                        wp.collection_id, wp.id, e
+                    );
+                }
+            }
+        }
+
+        ps.write_partitions = active_ids;
+
+        Ok(Json(serde_json::to_value(ps)?))
+    }
+
     async fn collection_create(
         &self,
         ctx: &Context<'_>,
@@ -125,8 +182,8 @@ impl Mutation {
         }
     }
 
-    async fn pserver_update(&self, ctx: &Context<'_>, data: JsonValue) -> FieldResult<JsonValue> {
-        let info: PServer = serde_json::from_value(data.0)?;
+    async fn pserver_update(&self, ctx: &Context<'_>, json: JsonValue) -> FieldResult<JsonValue> {
+        let info: PServer = serde_json::from_value(json.0)?;
         info!(
             "prepare to update pserver with address {}, zone {}",
             info.addr, info.zone
@@ -139,6 +196,28 @@ impl Mutation {
             Err(e) => {
                 error!("update server failed, err: {}", e.to_string());
                 return Err(FieldError(e.to_string(), None));
+            }
+        }
+    }
+
+    async fn partition_update(&self, ctx: &Context<'_>, json: JsonValue) -> FieldResult<JsonValue> {
+        let info: Partition = serde_json::from_value(json.0)
+            .map_err(|e| FieldError(format!("unmarshal partition has err:[{}]", e), None))?;
+
+        info!(
+            "prepare to update collection {} partition {}  to {}",
+            info.collection_id, info.id, info.leader
+        );
+        match ctx
+            .data_unchecked::<Arc<MasterService>>()
+            .update_partition(info)
+            .await
+        {
+            Ok(s) => Ok(Json(serde_json::to_value(s)?)),
+            Err(e) => {
+                let message = format!("update partition failed, err:{}", e.to_string());
+                error!("{}", message);
+                Err(FieldError(message, None))
             }
         }
     }
@@ -219,14 +298,23 @@ impl Query {
         )?))
     }
 
-    async fn pserver_get_addr(&self, ctx: &Context<'_>, server_id: i32) -> FieldResult<String> {
-        match ctx
-            .data_unchecked::<Arc<MasterService>>()
-            .get_server_addr(server_id as u32)
-        {
-            Ok(s) => Ok(s),
+    async fn pserver_get(&self, ctx: &Context<'_>, id: u32) -> FieldResult<JsonValue> {
+        info!("prepare to get pservers addr by server id");
+        let service = ctx.data_unchecked::<Arc<MasterService>>();
+
+        let addr = match service.get_server_addr(id) {
+            Ok(s) => s,
             Err(e) => {
-                error!("get pserver failed, err: {}", e.to_string());
+                let info = format!("get server by id has err, err: {}", e.to_string());
+                error!("{}", &info);
+                return Err(FieldError(info, None));
+            }
+        };
+
+        match service.get_server(addr.as_str()) {
+            Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
+            Err(e) => {
+                error!("get server failed, id:{}, err:{}", id, e.to_string());
                 Err(FieldError(e.to_string(), None))
             }
         }

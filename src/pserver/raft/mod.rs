@@ -6,13 +6,14 @@ use crate::util::{coding::*, config, entity::*};
 use async_std::task;
 use log::error;
 use raft4rs::{entity::Config, error::*, state_machine::*};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct NodeStateMachine {
 	simba: Option<Arc<Simba>>,
 	collection: Arc<Collection>,
 	partition: Arc<Partition>,
 	ps: Arc<PartitionService>,
+	term_lock: Mutex<usize>,
 }
 
 impl NodeStateMachine {
@@ -30,6 +31,7 @@ impl NodeStateMachine {
 			collection,
 			partition,
 			ps,
+			term_lock: Mutex::new(0),
 		}
 	}
 }
@@ -57,7 +59,22 @@ impl StateMachine for NodeStateMachine {
 		panic!()
 	}
 
-	fn apply_leader_change(&self, _term: u64, _index: u64, leader: u64) -> RaftResult<()> {
+	fn apply_leader_change(&self, term: u64, _index: u64, leader: u64) -> RaftResult<()> {
+		{
+			let _lock = self.term_lock.lock().unwrap();
+			if self.partition.load_term() > term {
+				return Err(RaftError::ErrCode(
+					500,
+					format!(
+						"apply leader change has err:[term:{} less:{}]",
+						term,
+						self.partition.load_term()
+					),
+				));
+			}
+			self.partition.set_term(term);
+		}
+
 		if let Err(e) = task::block_on(self.ps.apply_leader_change(
 			&self.collection,
 			&self.partition,
@@ -84,13 +101,17 @@ impl NodeResolver {
 
 impl Resolver for NodeResolver {
 	fn heartbeat_addr(&self, node_id: &u64) -> RaftResult<String> {
-		task::block_on(self.meta_client.get_server_addr_by_id(*node_id))
-			.map_err(|e| RaftError::Error(e.to_string()))
+		let pserver: PServer = task::block_on(self.meta_client.pserver_get(*node_id))
+			.map_err(|e| RaftError::Error(e.to_string()))?;
+
+		Ok(pserver.raft_heart_addr)
 	}
 
 	fn log_addr(&self, node_id: &u64) -> RaftResult<String> {
-		task::block_on(self.meta_client.get_server_addr_by_id(*node_id))
-			.map_err(|e| RaftError::Error(e.to_string()))
+		let pserver: PServer = task::block_on(self.meta_client.pserver_get(*node_id))
+			.map_err(|e| RaftError::Error(e.to_string()))?;
+
+		Ok(pserver.raft_log_addr)
 	}
 }
 

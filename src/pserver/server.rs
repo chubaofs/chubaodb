@@ -179,9 +179,9 @@ impl Rpc for RPCService {
             .init_partition(
                 req.collection_id,
                 req.partition_id,
+                req.term,
                 replicas,
                 req.readonly,
-                req.version,
             )
             .await
         {
@@ -189,7 +189,7 @@ impl Rpc for RPCService {
             Err(e) => e.into(),
         };
 
-        if let Err(e) = self.service.take_heartbeat().await {
+        if let Err(e) = self.service.take_heartbeat(None).await {
             return Ok(Response::new(e.into()));
         }
 
@@ -200,16 +200,11 @@ impl Rpc for RPCService {
         &self,
         request: Request<PartitionRequest>,
     ) -> Result<Response<GeneralResponse>, Status> {
-        if let Err(e) = self.service.offload_partition(request.into_inner()) {
+        if let Err(e) = self.service.offload_partition(request.into_inner()).await {
             return Ok(Response::new(e.into()));
         };
 
-        let rep = match self.service.take_heartbeat().await {
-            Ok(_) => make_general_success(),
-            Err(e) => e.into(),
-        };
-
-        Ok(Response::new(rep))
+        Ok(Response::new(make_general_success()))
     }
 }
 

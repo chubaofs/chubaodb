@@ -21,9 +21,10 @@ use crate::util::time::*;
 use crate::util::{coding, config::Config, entity::*, error::*};
 use crate::*;
 use async_std::sync::{Mutex, RwLock};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use rand::Rng;
 use std::cmp;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 pub struct MasterService {
@@ -83,7 +84,7 @@ impl MasterService {
                 )
             }
             Err(e) => {
-                if e.code() != Code::RocksDBNotFound {
+                if e.code() != Code::CollectionNotFound {
                     return Err(e);
                 }
             }
@@ -181,7 +182,7 @@ impl MasterService {
                 id: i,
                 collection_id: seq,
                 leader: server.addr.to_string(),
-                version: 0,
+                term: AtomicU64::new(0),
                 replicas: replicas,
             };
 
@@ -191,11 +192,10 @@ impl MasterService {
         collection.slots = slots;
         collection.partitions = pids;
 
-        info!("prepare add collection info:{}", partitions.len());
+        info!("prepare add collection partitions len:{}", partitions.len());
 
         self.meta_service.create(&collection)?;
         self.meta_service.put_batch(&partitions)?;
-
         for c in partitions {
             let mut replicas: Vec<ReplicaInfo> = vec![];
             for r in c.replicas {
@@ -209,25 +209,61 @@ impl MasterService {
                     partition_id: c.id,
                     collection_id: c.collection_id,
                     readonly: false,
-                    version: 0,
+                    term: 0,
                     replicas: replicas,
                 })
                 .await?;
         }
-
         collection.status = CollectionStatus::WORKING;
         self.meta_service.put(&collection)?;
         self.meta_service.put_kv(
             entity_key::collection_name(collection.name.as_str()).as_str(),
             &coding::u32_slice(collection.id)[..],
         )?;
+        let mut index = 0;
+        let start = crate::util::time::current_millis();
+        loop {
+            if let Ok(partition) = self.get_partition(collection.id, index) {
+                if partition.load_term() > 0 {
+                    index += 1;
+                    if index == partition_num {
+                        break;
+                    }
+                } else {
+                    if crate::util::time::current_millis() - start > 120000 {
+                        return result!(Code::Timeout, "crate collection timeout 2m");
+                    }
+                    index = 0;
+                }
+            } else {
+                return result!(
+                    Code::InternalErr,
+                    "collection:{} partition:{} not found, it may be a bug",
+                    collection.id,
+                    index
+                );
+            }
+            debug!("wait collection:{} partition:{}", collection.id, index);
+            crate::sleep!(50);
+        }
         Ok(collection)
     }
 
     pub fn get_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let value = self
             .meta_service
-            .get_kv(entity_key::collection_name(collection_name).as_str())?;
+            .get_kv(entity_key::collection_name(collection_name).as_str())
+            .map_err(|e| {
+                if e.code() == Code::RocksDBNotFound {
+                    err!(
+                        Code::CollectionNotFound,
+                        "partition name:{} not found",
+                        collection_name
+                    )
+                } else {
+                    e
+                }
+            })?;
 
         self.get_collection_by_id(coding::slice_u32(&value[..]))
     }
@@ -235,6 +271,17 @@ impl MasterService {
     pub fn get_collection_by_id(&self, collection_id: u32) -> ASResult<Collection> {
         self.meta_service
             .get(entity_key::collection(collection_id).as_str())
+            .map_err(|e| {
+                if e.code() == Code::RocksDBNotFound {
+                    err!(
+                        Code::CollectionNotFound,
+                        "partition id:{} not found",
+                        collection_id
+                    )
+                } else {
+                    e
+                }
+            })
     }
 
     pub fn list_collections(&self) -> ASResult<Vec<Collection>> {
@@ -256,13 +303,24 @@ impl MasterService {
     pub fn get_server(&self, server_addr: &str) -> ASResult<PServer> {
         self.meta_service
             .get(entity_key::pserver(server_addr).as_str())
+            .map_err(|e| {
+                if e.code() == Code::RocksDBNotFound {
+                    err!(
+                        Code::PServerNotFound,
+                        "paserver addr:{} not found",
+                        server_addr
+                    )
+                } else {
+                    e
+                }
+            })
     }
 
     pub fn register(&self, mut server: PServer) -> ASResult<PServer> {
         match self.get_server(server.addr.clone().as_ref()) {
             Ok(ps) => Ok(ps),
             Err(e) => {
-                if e.code() != Code::RocksDBNotFound {
+                if e.code() != Code::PServerNotFound {
                     return Err(e);
                 }
                 let seq = self.meta_service.increase_id(entity_key::SEQ_PSERVER)?;
@@ -340,7 +398,7 @@ impl MasterService {
         self.ps_cli.status(to_server).await?; //validate can be transfer
 
         let old_partition = self.get_partition(cid, pid)?;
-        let (old_addr, old_version) = (old_partition.leader, old_partition.version);
+        let (old_term, old_addr) = (old_partition.load_term(), old_partition.leader);
 
         for i in 0..100 as u8 {
             info!("try to transfer partition times:{}", i);
@@ -350,7 +408,7 @@ impl MasterService {
                 ptransfer.to_server = old_addr.clone();
             }
 
-            if let Err(e) = self.offload_partition(cid, pid, old_version).await {
+            if let Err(e) = self.offload_partition(cid, pid, old_term).await {
                 if e.code() == Code::VersionErr {
                     return Err(e);
                 }
@@ -367,7 +425,7 @@ impl MasterService {
                     ptransfer.to_server.as_str(),
                     ptransfer.collection_id,
                     ptransfer.partition_id,
-                    old_version,
+                    old_term,
                 )
                 .await
             {
@@ -392,7 +450,7 @@ impl MasterService {
         addr: &str,
         collection_id: u32,
         partition_id: u32,
-        version: u64,
+        term: u64,
     ) -> ASResult<GeneralResponse> {
         info!(
             "try to create or load collection:{} partition:{}",
@@ -402,12 +460,12 @@ impl MasterService {
         let partition = self.get_partition(collection_id, partition_id)?;
 
         //check version
-        if partition.version > version {
+        if partition.load_term() > term {
             return result!(
                 Code::VersionErr,
                 "load version has version err expected:{} , found:{} ",
-                version,
-                partition.version,
+                term,
+                partition.load_term(),
             );
         }
 
@@ -429,7 +487,7 @@ impl MasterService {
                 collection_id: collection_id,
                 partition_id: partition_id,
                 readonly: false,
-                version: version,
+                term: term,
                 replicas: vec![],
             })
             .await
@@ -439,7 +497,7 @@ impl MasterService {
         &self,
         collection_id: u32,
         partition_id: u32,
-        version: u64,
+        term: u64,
     ) -> ASResult<()> {
         for ps in self.list_servers()? {
             for wp in ps.write_partitions {
@@ -449,7 +507,7 @@ impl MasterService {
                             collection_id: collection_id,
                             partition_id: partition_id,
                             readonly: false,
-                            version: version,
+                            term: term,
                             replicas: vec![],
                         })
                         .await?;
@@ -464,7 +522,7 @@ impl MasterService {
                 collection_id: collection_id,
                 partition_id: partition_id,
                 readonly: false,
-                version: version,
+                term: term,
                 replicas: vec![],
             })
             .await?;
@@ -476,14 +534,14 @@ impl MasterService {
         let _lock = self.partition_lock.write().await;
         match self.get_partition(partition.collection_id, partition.id) {
             Ok(p) => {
-                if p.version >= partition.version {
+                if p.load_term() > partition.load_term() {
                     return result!(
                         Code::VersionErr,
                         "the collection:{} partition:{} version not right expected:{} found:{}",
                         partition.collection_id,
                         partition.id,
-                        partition.version,
-                        p.version
+                        partition.load_term(),
+                        p.load_term()
                     );
                 }
             }

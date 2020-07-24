@@ -6,6 +6,7 @@
 
 data/
 log/
+logs/
 .idea/
 anyindex.iml
 */target

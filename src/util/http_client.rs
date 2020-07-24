@@ -15,6 +15,8 @@ use crate::util::error::*;
 use crate::*;
 use async_std::future;
 use log::info;
+use serde_derive::Deserialize;
+use serde_json::{json, Value};
 use std::time::Duration;
 
 pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, m_timeout: u64) -> ASResult<V> {
@@ -77,9 +79,50 @@ where
     Ok(conver(resp.body_json::<V>().await)?)
 }
 
-// fn client_tout(timeout: u64) -> reqwest::Client {
-//     reqwest::Client::builder()
-//         .timeout(Duration::from_millis(timeout))
-//         .build()
-//         .unwrap()
-// }
+#[derive(Deserialize, Clone, Debug)]
+pub struct GraphqlResult {
+    pub errors: Option<Value>,
+    pub data: Option<Value>,
+}
+
+pub async fn graphql<V: std::fmt::Debug>(
+    url: &str,
+    m_timeout: u64,
+    query: &str,
+    variables: Value,
+    name: &str,
+) -> ASResult<V>
+where
+    V: serde::de::DeserializeOwned,
+{
+    info!("send graphql for query:{}", name);
+
+    let result: GraphqlResult = post_json(
+        url,
+        m_timeout,
+        &json!({
+            "query": query,
+            "variables":variables,
+        }),
+    )
+    .await?;
+
+    if result.errors.is_some() {
+        return result!(
+            Code::InternalErr,
+            serde_json::to_string(&result.errors.unwrap()).unwrap()
+        );
+    }
+
+    if result.data.is_some() {
+        match result.data.unwrap().get_mut(name) {
+            Some(v) => {
+                return serde_json::from_value(v.take())
+                    .map_err(|e| err!(Code::InternalErr, e.to_string()));
+            }
+            None => {}
+        }
+    }
+
+    return result!(Code::InternalErr, "data and errors both nil");
+}

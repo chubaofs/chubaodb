@@ -104,7 +104,12 @@ impl PartitionService {
     pub async fn init(self: &mut Arc<Self>) -> ASResult<()> {
         let ps = match self
             .meta_client
-            .register(self.conf.global.ip.as_str(), self.conf.ps.rpc_port as u32)
+            .register(
+                self.conf.global.ip.as_str(),
+                self.conf.ps.rpc_port,
+                self.conf.ps.raft.heartbeat_port,
+                self.conf.ps.raft.replicate_port,
+            )
             .await
         {
             Ok(p) => {
@@ -134,7 +139,7 @@ impl PartitionService {
 
         for wp in ps.write_partitions {
             if let Err(e) = self
-                .init_partition(wp.collection_id, wp.id, wp.replicas, false, wp.version)
+                .init_partition(wp.collection_id, wp.id, wp.load_term(), wp.replicas, false)
                 .await
             {
                 error!("init partition has err:{}", e.to_string());
@@ -148,9 +153,9 @@ impl PartitionService {
         self: &Arc<Self>,
         collection_id: u32,
         partition_id: u32,
+        term: u64,
         replicas: Vec<Replica>,
         _readonly: bool,
-        version: u64,
     ) -> ASResult<()> {
         info!(
             "to load partition:{} partition:{} exisit:{}",
@@ -175,10 +180,14 @@ impl PartitionService {
             return Ok(());
         }
 
-        let collection = Arc::new(self.meta_client.get_collection_by_id(collection_id).await?);
+        let collection = Arc::new(
+            self.meta_client
+                .collection_get(Some(collection_id), None)
+                .await?,
+        );
 
-        if version > 0 {
-            self.check_partition_version(collection_id, partition_id, version)
+        if term > 0 {
+            self.check_partition_term(collection_id, partition_id, term)
                 .await?;
         }
 
@@ -187,7 +196,7 @@ impl PartitionService {
             collection_id: collection_id,
             replicas: replicas,
             leader: format!("{}:{}", self.conf.global.ip, self.conf.ps.rpc_port), //TODO: first need set leader.
-            version: version + 1,
+            term: AtomicU64::new(term),
         });
 
         let simba = Simba::new(self.conf.clone(), collection.clone(), partition.clone())?;
@@ -231,24 +240,24 @@ impl PartitionService {
         Ok(())
     }
 
-    async fn check_partition_version(&self, cid: u32, pid: u32, version: u64) -> ASResult<()> {
-        let partition = self.meta_client.get_partition(cid, pid).await?;
+    async fn check_partition_term(&self, cid: u32, pid: u32, term: u64) -> ASResult<()> {
+        let partition = self.meta_client.partition_get(cid, pid).await?;
 
-        if partition.version > version {
+        if partition.load_term() > term {
             return result!(
                 Code::VersionErr,
-                "the collection:{} partition:{} version not right expected:{} found:{}",
+                "the collection:{} partition:{} term not right expected:{} found:{}",
                 cid,
                 pid,
-                version,
-                partition.version
+                term,
+                partition.load_term()
             );
         }
         Ok(())
     }
 
     //offload partition , if partition not exist , it will return success
-    pub fn offload_partition(&self, req: PartitionRequest) -> ASResult<GeneralResponse> {
+    pub async fn offload_partition(&self, req: PartitionRequest) -> ASResult<GeneralResponse> {
         info!(
             "to offload partition:{} partition:{} exisit:{}",
             req.collection_id,
@@ -277,6 +286,9 @@ impl PartitionService {
             }
             store.simba()?.release();
         }
+
+        self.take_heartbeat(None).await?;
+
         make_general_success()
     }
 
@@ -334,7 +346,13 @@ impl PartitionService {
                 .insert((cid, pid), Arc::new(store));
         }
 
-        self.take_heartbeat().await
+        let partition = if self.server_id.load(SeqCst) == leader_id {
+            Some(partition)
+        } else {
+            None
+        };
+
+        self.take_heartbeat(partition).await
     }
 
     async fn init_simba_by_raft(&self, simba: &Arc<Simba>, raft: &Arc<Raft>) -> RaftResult<()> {
@@ -358,7 +376,7 @@ impl PartitionService {
         Ok(())
     }
 
-    pub async fn take_heartbeat(&self) -> ASResult<()> {
+    pub async fn take_heartbeat(&self, partition: Option<&Arc<Partition>>) -> ASResult<()> {
         let _ = self.lock.lock().unwrap();
 
         let wps = self
@@ -370,13 +388,27 @@ impl PartitionService {
             .map(|(_, s)| Partition::clone(&*s.simba().unwrap().base.partition))
             .collect::<Vec<Partition>>();
 
+        if let Some(partition) = partition {
+            self.meta_client.partition_update(&*partition).await?;
+        }
+
         self.meta_client
-            .put_pserver(&PServer {
+            .pserver_update(&PServer {
                 id: Some(self.server_id.load(SeqCst) as u32),
                 addr: format!("{}:{}", self.conf.global.ip.as_str(), self.conf.ps.rpc_port),
+                raft_heart_addr: format!(
+                    "{}:{}",
+                    self.conf.global.ip.as_str(),
+                    self.conf.ps.raft.heartbeat_port
+                ),
+                raft_log_addr: format!(
+                    "{}:{}",
+                    self.conf.global.ip.as_str(),
+                    self.conf.ps.raft.replicate_port
+                ),
                 write_partitions: wps,
                 zone: self.conf.ps.zone.clone(),
-                modify_time: 0,
+                modify_time: crate::util::time::current_millis(),
             })
             .await
     }
@@ -599,7 +631,7 @@ impl PartitionService {
 
 fn make_not_found_err<T>(cid: u32, pid: u32) -> ASResult<T> {
     result!(
-        Code::RocksDBNotFound,
+        Code::PartitionNotFound,
         "not found collection:{}  partition by id:{}",
         cid,
         pid
