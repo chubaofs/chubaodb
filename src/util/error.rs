@@ -19,7 +19,7 @@ macro_rules! err {
         };
 
         if log_enabled!(Debug) {
-            ASError::Error(code, format!("{} trace:{:?}", $arg, backtrace::Backtrace::new()))
+            ASError::Error(code, format!("{} trace:{:?}", $arg, ASError::trace()))
         }else{
             ASError::Error(code, format!("{}", $arg))
         }
@@ -35,7 +35,7 @@ macro_rules! err {
         };
         if log_enabled!(Debug) {
             let msg = format!($($arg)*) ;
-            ASError::Error(code, format!("{} trace:{:?}", msg, backtrace::Backtrace::new()))
+            ASError::Error(code, format!("{} trace:{:?}", msg, ASError::trace()))
         }else{
             ASError::Error(code, format!($($arg)*))
         }
@@ -48,7 +48,7 @@ macro_rules! err_def {
         use log::log_enabled;
         use log::Level::Debug;
         if log_enabled!(Debug) {
-            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", $arg, backtrace::Backtrace::new()))
+            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", $arg, ASError::trace()))
         }else{
             ASError::Error(Code::InternalErr, format!("{}", $arg))
         }
@@ -58,7 +58,7 @@ macro_rules! err_def {
         use log::Level::Debug;
         if log_enabled!(Debug) {
             let msg = format!($($arg)*) ;
-            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", msg, backtrace::Backtrace::new()))
+            ASError::Error(Code::InternalErr, format!("{} trace:{:?}", msg, ASError::trace()))
         }else{
             ASError::Error(Code::InternalErr, format!($($arg)*))
         }
@@ -191,6 +191,26 @@ impl ASError {
                 "message": m
             }),
         }
+    }
+
+    pub fn trace() -> Vec<String> {
+        let mut list = Vec::new();
+        backtrace::trace(|frame| {
+            // Resolve this instruction pointer to a symbol name
+            backtrace::resolve_frame(frame, |symbol| {
+                let line = format!(
+                    "name:{:?} line:{:?}",
+                    symbol.name(),
+                    symbol.lineno().unwrap_or(0)
+                );
+
+                if line.contains("chubaodb") {
+                    list.push(line);
+                }
+            });
+            true // keep going to the next frame
+        });
+        list
     }
 }
 

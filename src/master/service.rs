@@ -369,7 +369,18 @@ impl MasterService {
     pub fn list_partitions(&self, collection_name: &str) -> ASResult<Vec<Partition>> {
         let value = self
             .meta_service
-            .get_kv(entity_key::collection_name(collection_name).as_str())?;
+            .get_kv(entity_key::collection_name(collection_name).as_str())
+            .map_err(|e| {
+                if e.code() == Code::RocksDBNotFound {
+                    err!(
+                        Code::CollectionNotFound,
+                        "partition name:{} not found",
+                        collection_name
+                    )
+                } else {
+                    e
+                }
+            })?;
 
         self.list_partitions_by_id(coding::slice_u32(&value[..]))
     }

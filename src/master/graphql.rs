@@ -48,6 +48,8 @@ pub struct Mutation;
 #[Object]
 impl Mutation {
     async fn pserver_register(&self, ctx: &Context<'_>, json: JsonValue) -> FieldResult<JsonValue> {
+        info!("recive pserver_register begin");
+
         let ps: PServer = serde_json::from_value(json.0)
             .map_err(|e| FieldError(format!("unmarshal pserver has err:[{}]", e), None))?;
 

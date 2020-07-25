@@ -19,10 +19,10 @@ use serde_derive::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, m_timeout: u64) -> ASResult<V> {
+pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, timeout_sec: u64) -> ASResult<V> {
     info!("send get for url:{}", url);
 
-    let mut resp = match future::timeout(Duration::from_millis(m_timeout), surf::get(url)).await {
+    let mut resp = match future::timeout(Duration::from_millis(timeout_sec), surf::get(url)).await {
         Err(e) => return result!(Code::Timeout, e.to_string()),
         Ok(resp) => conver(resp)?,
     };
@@ -45,7 +45,7 @@ pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, m_timeout: u64)
     Ok(resp.body_json::<V>().await?)
 }
 
-pub async fn post_json<T, V>(url: &str, m_timeout: u64, obj: &T) -> ASResult<V>
+pub async fn post_json<T, V>(url: &str, timeout_sec: u64, obj: &T) -> ASResult<V>
 where
     T: serde::Serialize + ?Sized,
     V: serde::de::DeserializeOwned,
@@ -53,7 +53,7 @@ where
     info!("send post for url:{}", url);
 
     let mut resp = match future::timeout(
-        Duration::from_millis(m_timeout),
+        Duration::from_millis(timeout_sec),
         surf::post(url).body_json(&obj).unwrap(),
     )
     .await
@@ -87,7 +87,7 @@ pub struct GraphqlResult {
 
 pub async fn graphql<V: std::fmt::Debug>(
     url: &str,
-    m_timeout: u64,
+    timeout_sec: u64,
     query: &str,
     variables: Value,
     name: &str,
@@ -95,11 +95,15 @@ pub async fn graphql<V: std::fmt::Debug>(
 where
     V: serde::de::DeserializeOwned,
 {
-    info!("send graphql for query:{}", name);
+    info!(
+        "send graphql for query:{} variables:{:?}",
+        query,
+        serde_json::to_string(&variables)
+    );
 
     let result: GraphqlResult = post_json(
         url,
-        m_timeout,
+        timeout_sec,
         &json!({
             "query": query,
             "variables":variables,
@@ -125,4 +129,17 @@ where
     }
 
     return result!(Code::InternalErr, "data and errors both nil");
+}
+
+#[test]
+fn test_graphql() {
+    let json = json!({
+        "query":"{partitionList(collectionName:\"t1\")}",
+    });
+
+    let f = post_json("http://127.0.0.1:7070", 100000, &json);
+
+    let v: Value = async_std::task::block_on(f).unwrap();
+
+    println!("{:#?}", v);
 }
