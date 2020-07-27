@@ -15,8 +15,8 @@ use crate::util::error::*;
 use crate::*;
 use chrono::prelude::*;
 
-pub fn current_millis() -> u64 {
-    Local::now().timestamp_millis() as u64
+pub fn current_millis() -> i64 {
+    Local::now().timestamp_millis() as i64
 }
 
 pub fn timestamp() -> String {

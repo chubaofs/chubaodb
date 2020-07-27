@@ -452,7 +452,9 @@ impl PartitionService {
         Ok(DocumentResponse {
             code: Code::Success as i32,
             message: String::from("success"),
-            doc: store.simba()?.get(req.id.as_str(), req.sort_key.as_str())?,
+            doc: store
+                .simba()?
+                .get_doc(req.id.as_str(), req.sort_key.as_str())?,
         })
     }
 

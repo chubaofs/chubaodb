@@ -619,7 +619,7 @@ fn gr_to_json(gr: GeneralResponse) -> serde_json::value::Value {
 
 fn parse_sort(query: &Query) -> ASResult<Vec<Order>> {
     if let Some(sort) = query.sort.as_ref() {
-        sort.split("|")
+        sort.split(",")
             .map(|s| s.split(":").collect::<Vec<&str>>())
             .map(|s| {
                 if s.len() != 2 {

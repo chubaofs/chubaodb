@@ -7,25 +7,21 @@ import time
 from sgqlc.endpoint.http import HTTPEndpoint
 
 
-
-
 def test_del_collection():
-    query ="""
+    query = """
         mutation($name:String!){
             collectionDelete(name:$name)
         }
     """
     endpoint = HTTPEndpoint(config.MASTER)
-    data = endpoint(query, {"name":"t1"})
+    data = endpoint(query, {"name": "t1"})
     print("del_collection---\n" + json.dumps(data))
-    if len(data.get("errors",[])) > 0:
+    if len(data.get("errors", [])) > 0:
         assert "code:CollectionNotFound" in data["errors"][0]["message"]
 
 
-
-
 def test_create_collection():
-    query ="""
+    query = """
         mutation{
             collectionCreate(
                 name:"t1", 
@@ -42,8 +38,7 @@ def test_create_collection():
     endpoint = HTTPEndpoint(config.MASTER)
     data = endpoint(query, {})
     print("create_collection---\n" + json.dumps(data))
-    assert len(data.get("errors",[])) == 0
-
+    assert len(data.get("errors", [])) == 0
 
 
 def test_put():
@@ -70,7 +65,7 @@ def test_put():
 
 def test_update():
     test_put()
-    url =  config.ROUTER + "/update/t1/1"
+    url = config.ROUTER + "/update/t1/1"
     headers = {"content-type": "application/json"}
     data = {
         "name": ["ansj", "ansj"],
@@ -114,11 +109,11 @@ def test_delete():
     print(url)
     response = requests.delete(url)
     print("delete---" + response.text)
-    assert response.status_code == 200 or response.status_code == 555
+    assert response.status_code == 200 or response.status_code == 551
 
     response = requests.get(config.ROUTER+"/get/t1/1")
     print("get---" + response.text)
-    assert response.status_code == 555
+    assert response.status_code == 551
 
 
 def test_create():
@@ -147,7 +142,7 @@ def test_create():
     print(url + "---" + json.dumps(data))
     response = requests.post(url, headers=headers, data=json.dumps(data))
     print("create---\n" + response.text)
-    assert response.status_code == 550
+    assert response.status_code == 552
     # get doc
     response = requests.get(config.ROUTER+"/get/t1/1")
     print("get--" + response.text)
@@ -223,7 +218,8 @@ def test_upsert():
 
 def test_search():
     time.sleep(5)
-    response = requests.get(config.ROUTER+"/search/t1?query=hello%20tig&size=10&def_fields=content")
+    response = requests.get(
+        config.ROUTER+"/search/t1?query=hello%20tig&size=10&def_fields=content")
     print("space_create---\n" + response.text)
     assert response.status_code == 200
     v = json.loads(response.text)

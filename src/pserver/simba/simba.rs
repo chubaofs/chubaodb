@@ -107,11 +107,11 @@ impl Simba {
 
         Ok(simba)
     }
-    pub fn get(&self, id: &str, sort_key: &str) -> ASResult<Vec<u8>> {
-        Ok(self.get_by_key(key_coding(id, sort_key).as_ref())?.1)
+    pub fn get_doc(&self, id: &str, sort_key: &str) -> ASResult<Vec<u8>> {
+        Ok(self.get_doc_by_key(key_coding(id, sort_key).as_ref())?.1)
     }
 
-    fn get_by_key(&self, key: &Vec<u8>) -> ASResult<(Vec<u8>, Vec<u8>)> {
+    fn get_doc_by_key(&self, key: &Vec<u8>) -> ASResult<(Vec<u8>, Vec<u8>)> {
         let iid = match self.rocksdb.db.get(key).map_err(cast)? {
             Some(v) => v,
             None => return result!(Code::DocumentNotFound, "not found id by key:[{:?}]", key),
@@ -201,12 +201,16 @@ impl Simba {
 
         let _lock = self.latch.latch_lock(doc.slot);
 
-        if let Err(e) = self.get_by_key(&key) {
-            if e.code() != Code::RocksDBNotFound {
+        if let Err(e) = self.get_doc_by_key(&key) {
+            if e.code() != Code::DocumentNotFound {
                 return Err(e);
             }
         } else {
-            return result_def!("the document:{:?} already exists", key);
+            return result!(
+                Code::AlreadyExists,
+                "thid doc already exists by key:[{:?}]",
+                key
+            );
         }
 
         self.raft_write(Event::Create(key, buf1), raft).await
@@ -218,7 +222,7 @@ impl Simba {
         let _lock = self.latch.latch_lock(doc.slot);
 
         let (old_iid, old) =
-            self.get_by_key(&key_coding(doc.id.as_str(), doc.sort_key.as_str()))?;
+            self.get_doc_by_key(&key_coding(doc.id.as_str(), doc.sort_key.as_str()))?;
         let old: Document = Message::decode(prost::bytes::Bytes::from(old))?;
         if old_version > 0 && old.version != old_version {
             return result!(
@@ -241,10 +245,10 @@ impl Simba {
     async fn _upsert(&self, mut doc: Document, raft: Arc<Raft>) -> ASResult<()> {
         let key = doc_key(&doc);
         let _lock = self.latch.latch_lock(doc.slot);
-        let old = match self.get_by_key(key.as_ref()) {
+        let old = match self.get_doc_by_key(key.as_ref()) {
             Ok(o) => Some(o),
             Err(e) => {
-                if e.code() == Code::RocksDBNotFound {
+                if e.code() == Code::DocumentNotFound {
                     None
                 } else {
                     return Err(e);

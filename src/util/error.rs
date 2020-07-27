@@ -114,12 +114,13 @@ pub fn conver<T, E: std::fmt::Display>(result: Result<T, E>) -> ASResult<T> {
 pub enum Code {
     Success = 200,
     InternalErr = 550,
+    DocumentNotFound,
+    AlreadyExists,
     InvalidErr,
     ParamError,
     EngineNotReady,
     EngineWillClose,
     RocksDBNotFound,
-    AlreadyExists,
     VersionErr,
     PServerNotFound,
     CollectionNoIndex,
@@ -136,7 +137,6 @@ pub enum Code {
     EncodingErr,
     DencodingErr,
     Timeout,
-    DocumentNotFound,
 }
 
 impl Code {

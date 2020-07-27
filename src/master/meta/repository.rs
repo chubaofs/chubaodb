@@ -53,13 +53,13 @@ impl HARepository {
     }
 
     //to add a lock by master key is key str, value is  u64(timeout_mill) + addr
-    pub fn lock(&self, key: &str, ttl_mill: u64) -> ASResult<String> {
+    pub fn lock(&self, key: &str, ttl_mill: i64) -> ASResult<String> {
         let _lock = self.lock.lock().unwrap();
 
         let key = entity_key::lock(key);
 
         if let Some(value) = self.db.get(key.as_bytes())? {
-            let time_out = slice_u64(&value);
+            let time_out = slice_u64(&value) as i64;
             if current_millis() >= time_out {
                 return result!(Code::ParamError, "has already lockd");
             }
@@ -83,7 +83,7 @@ impl HARepository {
     }
 
     //The contract lock
-    pub fn lock_keep_alive(&self, key: &str, lease: &str, ttl_mill: u64) -> ASResult<()> {
+    pub fn lock_keep_alive(&self, key: &str, lease: &str, ttl_mill: i64) -> ASResult<()> {
         let _lock = self.lock.lock().unwrap();
 
         let key = entity_key::lock(key);
@@ -95,7 +95,7 @@ impl HARepository {
                     return result!(Code::LockedLeaseExpried, "lease not locked for key");
                 }
 
-                if current_millis() >= time_out {
+                if current_millis() >= time_out as i64 {
                     return result!(Code::LockedLeaseExpried, "lease is expried");
                 }
             }

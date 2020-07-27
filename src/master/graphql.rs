@@ -194,7 +194,14 @@ impl Mutation {
             .data_unchecked::<Arc<MasterService>>()
             .update_server(info)
         {
-            Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
+            Ok(s) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::to_value(s.clone()).unwrap())
+                        .unwrap()
+                );
+                return Ok(Json(serde_json::to_value(s)?));
+            }
             Err(e) => {
                 error!("update server failed, err: {}", e.to_string());
                 return Err(FieldError(e.to_string(), None));

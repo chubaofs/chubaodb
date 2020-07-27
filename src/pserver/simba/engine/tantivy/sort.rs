@@ -76,12 +76,14 @@ impl PartialOrd for FieldScore {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         for (i, v) in other.fields.iter().enumerate() {
             let asc = self.asc[i];
+
             let order = FieldScore::cmp(&self.fields[i], v);
+
             if order != Ordering::Equal {
                 if asc {
-                    return Some(order);
-                } else {
                     return Some(order.reverse());
+                } else {
+                    return Some(order);
                 }
             }
         }

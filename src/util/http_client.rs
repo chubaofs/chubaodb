@@ -13,70 +13,38 @@
 // permissions and limitations under the License.
 use crate::util::error::*;
 use crate::*;
-use async_std::future;
-use log::info;
+use log::{debug, info};
 use serde_derive::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, timeout_sec: u64) -> ASResult<V> {
+pub async fn get_json<V: serde::de::DeserializeOwned>(url: &str, m_timeout: u64) -> ASResult<V> {
     info!("send get for url:{}", url);
 
-    let mut resp = match future::timeout(Duration::from_millis(timeout_sec), surf::get(url)).await {
-        Err(e) => return result!(Code::Timeout, e.to_string()),
-        Ok(resp) => conver(resp)?,
-    };
+    let resp = client_tout(m_timeout).get(url).send().await?;
 
-    let http_code = resp.status().as_u16();
+    let http_code = resp.status().as_u16() as i32;
     if http_code != 200 {
-        //try genererr
-        let text = conver(resp.body_string().await)?;
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
-            if let Some(code) = value.get("code") {
-                if let Some(message) = value.get("message") {
-                    return result!(code.as_u64().unwrap() as i32, message.to_string());
-                };
-            };
-        };
-
-        return result!(http_code as i32, text);
+        return result!(http_code, resp.text().await?);
     }
 
-    Ok(resp.body_json::<V>().await?)
+    Ok(resp.json::<V>().await?)
 }
 
-pub async fn post_json<T, V>(url: &str, timeout_sec: u64, obj: &T) -> ASResult<V>
+pub async fn post_json<T, V>(url: &str, m_timeout: u64, obj: &T) -> ASResult<V>
 where
     T: serde::Serialize + ?Sized,
     V: serde::de::DeserializeOwned,
 {
     info!("send post for url:{}", url);
+    let resp = client_tout(m_timeout).post(url).json(obj).send().await?;
 
-    let mut resp = match future::timeout(
-        Duration::from_millis(timeout_sec),
-        surf::post(url).body_json(&obj).unwrap(),
-    )
-    .await
-    {
-        Err(e) => return result!(Code::Timeout, e.to_string()),
-        Ok(resp) => conver(resp)?,
-    };
-
-    let http_code = resp.status().as_u16();
+    let http_code = resp.status().as_u16() as i32;
     if http_code != 200 {
-        //try genererr
-        let text = conver(resp.body_string().await)?;
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
-            if let Some(code) = value.get("code") {
-                if let Some(message) = value.get("message") {
-                    return result!(code.as_i64().unwrap() as i32, message.to_string());
-                };
-            };
-        };
-        return result!(http_code as i32, text);
+        return result!(http_code, resp.text().await?);
     }
 
-    Ok(conver(resp.body_json::<V>().await)?)
+    Ok(resp.json::<V>().await?)
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -95,7 +63,7 @@ pub async fn graphql<V: std::fmt::Debug>(
 where
     V: serde::de::DeserializeOwned,
 {
-    info!(
+    debug!(
         "send graphql for query:{} variables:{:?}",
         query,
         serde_json::to_string(&variables)
@@ -133,13 +101,19 @@ where
 
 #[test]
 fn test_graphql() {
-    let json = json!({
-        "query":"{partitionList(collectionName:\"t1\")}",
-    });
+    for _ in 1..100 {
+        let json = json!({
+            "query":"{partitionList(collectionName:\"t1\")}",
+        });
+        let f = post_json("http://127.0.0.1:7070", 100000, &json);
+        let v: Value = async_std::task::block_on(f).unwrap();
+        println!("{:#?}", v);
+    }
+}
 
-    let f = post_json("http://127.0.0.1:7070", 100000, &json);
-
-    let v: Value = async_std::task::block_on(f).unwrap();
-
-    println!("{:#?}", v);
+fn client_tout(timeout: u64) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout))
+        .build()
+        .unwrap()
 }
