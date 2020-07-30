@@ -155,6 +155,39 @@ impl Mutation {
         }
     }
 
+    async fn collection_hibernate(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+    ) -> FieldResult<JsonValue> {
+        info!("prepare to delete collection name {}", name);
+
+        match ctx
+            .data_unchecked::<Arc<MasterService>>()
+            .hibernate_collection(&name)
+            .await
+        {
+            Ok(s) => Ok(Json(json!({
+                "success":true,
+                "collection":s
+            }))),
+            Err(e) => {
+                error!(
+                    "delete collection failed, collection_name {}, err: {}",
+                    name,
+                    e.to_string()
+                );
+                Err(FieldError(
+                    format!(
+                        "delete collection failed, collection_name: {}, err: {}",
+                        name, e
+                    ),
+                    None,
+                ))
+            }
+        }
+    }
+
     async fn collection_delete(&self, ctx: &Context<'_>, name: String) -> FieldResult<JsonValue> {
         info!("prepare to delete collection name {}", name);
 

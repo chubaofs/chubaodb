@@ -148,6 +148,7 @@ message Document {
   uint32 partition_id = 5;
   bytes source = 6;
   repeated Vector vectors = 7;
+  repeated bytes scalars = 8;
 }
 
 message Vector {

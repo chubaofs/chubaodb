@@ -13,7 +13,6 @@
 // permissions and limitations under the License.
 use crate::pserverpb::*;
 use crate::util::error::*;
-use crate::util::time::*;
 use crate::*;
 use async_graphql::{Enum, InputObject};
 use serde_derive::{Deserialize, Serialize};
@@ -28,17 +27,19 @@ pub const ID_BYTES: &'static str = "_iid_bytes";
 pub struct IntField {
     pub name: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     #[field(
         desc = "is value to store it in column , if it need sort or get or aggregation",
         default = false
     )]
-    #[serde(default = "default_false")]
+    #[field(desc = "is need sort or agg for the field", default = false)]
     pub value: bool,
+    #[field(desc = "is need search for the field", default = true)]
+    pub index: bool,
+    #[field(desc = "is need range for the field", default = false)]
+    pub scalar: bool,
 }
 
 #[InputObject]
@@ -46,21 +47,19 @@ pub struct IntField {
 pub struct FloatField {
     pub name: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     #[field(
         desc = "is value to store it in column , if it need sort or get or aggregation",
         default = false
     )]
-    #[serde(default = "default_false")]
+    #[field(desc = "is need sort or agg for the field", default = false)]
     pub value: bool,
-}
-
-fn default_false() -> bool {
-    false
+    #[field(desc = "is need search for the field", default = true)]
+    pub index: bool,
+    #[field(desc = "is need range for the field", default = false)]
+    pub scalar: bool,
 }
 
 #[InputObject]
@@ -68,17 +67,22 @@ fn default_false() -> bool {
 pub struct StringField {
     pub name: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     #[field(
         desc = "is value to store it in column , if it need sort or get or aggregation",
         default = false
     )]
-    #[serde(default = "default_false")]
+    #[field(desc = "is need sort or agg for the field", default = false)]
     pub value: bool,
+    #[field(desc = "is need search for the field", default = true)]
+    pub index: bool,
+    #[field(
+        desc = "is need range for the field , For variable-length fields you need to set the length，if the length is exceeded, it will be truncated",
+        default = 0
+    )]
+    pub scalar: i32,
 }
 
 #[InputObject]
@@ -86,17 +90,22 @@ pub struct StringField {
 pub struct TextField {
     pub name: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     #[field(
         desc = "is value to store it in column , if it need sort or get or aggregation",
         default = false
     )]
-    #[serde(default = "default_false")]
+    #[field(desc = "is need sort or agg for the field", default = false)]
     pub value: bool,
+    #[field(desc = "is need search for the field", default = true)]
+    pub index: bool,
+    #[field(
+        desc = "is need range for the field , For variable-length fields you need to set the length，if the length is exceeded, it will be truncated",
+        default = 0
+    )]
+    pub scalar: i32,
 }
 
 #[InputObject]
@@ -104,7 +113,6 @@ pub struct TextField {
 pub struct BytesField {
     pub name: String,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
 }
 
@@ -115,17 +123,19 @@ pub struct DateField {
     #[field(desc = "time str format", default = "auto")]
     pub format: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     #[field(
         desc = "is value to store it in column , if it need sort or get or aggregation",
         default = false
     )]
-    #[serde(default = "default_false")]
+    #[field(desc = "is need sort or agg for the field", default = false)]
     pub value: bool,
+    #[field(desc = "is need search for the field", default = true)]
+    pub index: bool,
+    #[field(desc = "is need range for the field", default = false)]
+    pub scalar: bool,
 }
 
 #[Enum(desc = "computer method default is L2")]
@@ -140,10 +150,8 @@ pub enum MetricType {
 pub struct VectorField {
     pub name: String,
     #[field(desc = "is array type of values", default = false)]
-    #[serde(default = "default_false")]
     pub array: bool,
     #[field(desc = "value can miss", default = false)]
-    #[serde(default = "default_false")]
     pub none: bool,
     //train when doc got the size, if size <=0 , not train
     pub train_size: i32,
@@ -269,6 +277,39 @@ impl Field {
         }
     }
 
+    pub fn index(&self) -> bool {
+        match self {
+            Field::int(f) => f.index,
+            Field::float(f) => f.index,
+            Field::string(f) => f.index,
+            Field::text(f) => f.index,
+            Field::bytes(_) => false,
+            Field::date(f) => f.index,
+            Field::vector(_) => true,
+        }
+    }
+
+    pub fn scalar(&self) -> bool {
+        match self {
+            Field::int(f) => f.scalar,
+            Field::float(f) => f.scalar,
+            Field::string(f) => f.scalar > 0,
+            Field::text(f) => f.scalar > 0,
+            Field::bytes(_) => false,
+            Field::date(f) => f.scalar,
+            Field::vector(_) => false,
+        }
+    }
+
+    pub fn scalar_len(&self) -> usize {
+        match self {
+            Field::int(_) | Field::float(_) | Field::date(_) => 8,
+            Field::string(f) => f.scalar as usize,
+            Field::text(f) => f.scalar as usize,
+            _ => 0,
+        }
+    }
+
     pub fn validate(&self, v: Option<&Value>) -> ASResult<()> {
         if v.is_none() {
             if self.none() {
@@ -339,6 +380,7 @@ pub enum CollectionStatus {
     CREATING = 1,
     DROPED = 2,
     WORKING = 3,
+    HIBERNATE = 4,
 }
 
 impl Default for CollectionStatus {
@@ -358,12 +400,13 @@ pub struct Collection {
     pub partitions: Vec<u32>,
     pub slots: Vec<u32>,
     pub status: CollectionStatus,
-    #[serde(with = "as_json_string")]
     pub modify_time: i64,
     #[serde(skip)]
-    pub vector_field_index: Vec<usize>,
+    pub vector_field: Vec<usize>,
     #[serde(skip)]
-    pub scalar_field_index: Vec<usize>,
+    pub index_field: Vec<usize>,
+    #[serde(skip)]
+    pub scalar_field: Vec<usize>,
     #[serde(skip)]
     pub field_map: HashMap<String, usize>,
 }
@@ -371,19 +414,28 @@ pub struct Collection {
 impl Collection {
     pub fn init(&mut self) {
         let mut vector_index = Vec::new();
-        let mut scalar_index = Vec::new();
+        let mut index_field = Vec::new();
+        let mut scalar_field = Vec::new();
         let mut field_map = HashMap::new();
         for (i, f) in self.fields.iter_mut().enumerate() {
+            field_map.insert(f.name().to_string(), i);
             if f.is_vector() {
                 vector_index.push(i);
-            } else {
-                scalar_index.push(i);
+                continue;
             }
-            field_map.insert(f.name().to_string(), i);
+
+            if f.index() {
+                index_field.push(i);
+            }
+
+            if f.scalar() {
+                scalar_field.push(i);
+            }
         }
 
-        self.vector_field_index = vector_index;
-        self.scalar_field_index = scalar_index;
+        self.vector_field = vector_index;
+        self.index_field = index_field;
+        self.scalar_field = scalar_field;
         self.field_map = field_map;
     }
 
@@ -406,8 +458,20 @@ impl Collection {
         for f in self.fields.iter() {
             let name = f.name();
 
-            if name.is_empty() {
-                return result!(Code::ParamError, "field name can not be empty:{:?}", f);
+            if !f.index() && !f.value() && !f.scalar() {
+                return result!(
+                    Code::ParamError,
+                    "field:{:?}, you need define [`index`, `value`, `scalar`] least one is true",
+                    f
+                );
+            }
+
+            if f.array() && f.scalar() {
+                return result!(
+                    Code::ParamError,
+                    "field:{:?}, array field can not set to scalar",
+                    f
+                );
             }
 
             Self::name_validate(name)?;
@@ -510,7 +574,6 @@ pub struct PServer {
     pub write_partitions: Vec<Partition>,
     #[serde(default)]
     pub zone: String,
-    #[serde(default = "current_millis", with = "as_json_string")]
     pub modify_time: i64,
 }
 
@@ -768,37 +831,4 @@ fn test_name_validate() {
     assert_eq!(true, Collection::name_validate("name_value-abc").is_err());
     assert_eq!(true, Collection::name_validate("_name_value-abc").is_err());
     assert_eq!(true, Collection::name_validate("_name_value abc").is_err());
-}
-
-// copy from  https://serde.rs/convert-error.html
-// Serialize and deserialize logic for dealing with nested values reprsented as
-// JSON strings.
-mod as_json_string {
-    use serde::de::{Deserialize, DeserializeOwned, Deserializer};
-    use serde::ser::{Serialize, Serializer};
-    use serde_json;
-
-    // Serialize to a JSON string, then serialize the string to the output
-    // format.
-    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: Serialize,
-        S: Serializer,
-    {
-        use serde::ser::Error;
-        let j = serde_json::to_string(value).map_err(Error::custom)?;
-        j.serialize(serializer)
-    }
-
-    // Deserialize a string from the input format, then deserialize the content
-    // of that string as JSON.
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-    where
-        T: DeserializeOwned,
-        D: Deserializer<'de>,
-    {
-        use serde::de::Error;
-        let j = String::deserialize(deserializer)?;
-        serde_json::from_str(&j).map_err(Error::custom)
-    }
 }

@@ -95,10 +95,16 @@ impl Tantivy {
         schema_builder.add_i64_field(ID, schema::IntOptions::default().set_indexed());
         schema_builder.add_bytes_field(ID_BYTES); //if you want put default filed mut modify validate method - 2 in code
 
-        for i in base.collection.scalar_field_index.iter() {
+        for i in base.collection.index_field.iter() {
             let field = &base.collection.fields[*i as usize];
 
-            let name = field.name();
+            let mut name = field.name().to_string();
+            let value_name = Self::value_field_format(name.as_str());
+            if !field.index() {
+                name = Self::empty_field_format(name.as_str());
+            }
+
+            let name = name.as_str();
 
             match field {
                 int(_) => {
@@ -121,7 +127,7 @@ impl Tantivy {
             }
 
             if field.value() {
-                schema_builder.add_bytes_field(Self::value_field_format(name).as_str());
+                schema_builder.add_bytes_field(value_name.as_str());
             }
         }
 
@@ -178,7 +184,14 @@ impl Tantivy {
         if name == ID_BYTES {
             return String::from(ID_BYTES);
         }
-        format!("__{}", name)
+        format!("_value_{}", name)
+    }
+
+    pub fn empty_field_format(name: &str) -> String {
+        if name == ID_BYTES {
+            return String::from(ID_BYTES);
+        }
+        format!("_empty_{}", name)
     }
 
     pub fn release(&self) {
@@ -483,7 +496,7 @@ impl Tantivy {
 
         let mut flag: bool = false;
 
-        for index in self.collection.scalar_field_index.iter() {
+        for index in self.collection.index_field.iter() {
             let field = &self.collection.fields[*index];
 
             let v = &source[field.name()];
@@ -500,25 +513,27 @@ impl Tantivy {
 
             if field.array() {
                 let values = v.as_array().unwrap();
-                for a in values {
-                    let v = match field {
-                        string(_) | text(_) => Value::Str(json(a)?.try_into()?),
-                        int(_) => Value::I64(json(a)?.try_into()?),
-                        date(_) => {
-                            let naive: NaiveDateTime = json(a)?.try_into()?;
-                            Value::Date(DateTime::from_utc(naive, Utc))
-                        }
-                        float(_) => Value::F64(json(a)?.try_into()?),
-                        _ => {
-                            return result!(
-                                Code::FieldTypeErr,
-                                "not support this type :{:?}",
-                                field,
-                            )
-                        }
-                    };
 
-                    doc.add(FieldValue::new(field_index, v));
+                if field.index() {
+                    for a in values {
+                        let v = match field {
+                            string(_) | text(_) => Value::Str(json(a)?.try_into()?),
+                            int(_) => Value::I64(json(a)?.try_into()?),
+                            date(_) => {
+                                let naive: NaiveDateTime = json(a)?.try_into()?;
+                                Value::Date(DateTime::from_utc(naive, Utc))
+                            }
+                            float(_) => Value::F64(json(a)?.try_into()?),
+                            _ => {
+                                return result!(
+                                    Code::FieldTypeErr,
+                                    "not support this type :{:?}",
+                                    field,
+                                )
+                            }
+                        };
+                        doc.add(FieldValue::new(field_index, v));
+                    }
                 }
 
                 if is_value {
@@ -609,7 +624,9 @@ impl Tantivy {
                     _ => return result!(Code::FieldTypeErr, "not support this type :{:?}", field,),
                 };
 
-                doc.add(FieldValue::new(field_index, v));
+                if field.index() {
+                    doc.add(FieldValue::new(field_index, v));
+                }
             }
 
             flag = true;

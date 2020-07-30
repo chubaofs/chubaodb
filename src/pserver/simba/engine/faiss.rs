@@ -146,7 +146,7 @@ impl Faiss {
             base: base.clone(),
             fields: HashMap::new(),
         };
-        for i in faiss.base.collection.vector_field_index.iter() {
+        for i in faiss.base.collection.vector_field.iter() {
             let f = base.collection.fields[*i as usize].vector()?;
 
             let index_dir = base.base_path().join(Path::new(VECTOR_DIR_NAME));

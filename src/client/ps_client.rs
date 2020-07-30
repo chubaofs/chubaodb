@@ -112,6 +112,7 @@ impl PsClient {
                     partition_id: ps.partition_id,
                     version: version,
                     vectors: Vec::default(),
+                    scalars: Vec::default(),
                 }),
                 write_type: wt,
             },
@@ -163,6 +164,31 @@ impl PsClient {
             },
         )
         .await
+    }
+
+    pub async fn multiple_search(
+        self: &Arc<Self>,
+        collection_name: Vec<String>,
+        query: QueryRequest,
+    ) -> ASResult<SearchDocumentResponse> {
+        let (tx, rx) = channel(10);
+        for name in collection_name {
+            let tx = tx.clone();
+            let cli = self.clone();
+            let query = query.clone();
+            task::spawn(async move { tx.send(cli.search(name.as_str(), query).await).await });
+        }
+
+        drop(tx);
+
+        let mut dist = rx.recv().await.unwrap()?;
+
+        while let Ok(src) = rx.recv().await {
+            let src = src?;
+            dist = merge_search_document_response(dist, src);
+        }
+
+        return Ok(dist);
     }
 
     pub async fn search(

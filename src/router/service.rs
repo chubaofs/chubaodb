@@ -17,13 +17,13 @@ use crate::util::{config::Config, error::*};
 use std::sync::Arc;
 
 pub struct RouterService {
-    ps_client: PsClient,
+    ps_client: Arc<PsClient>,
 }
 
 impl RouterService {
     pub async fn new(conf: Arc<Config>) -> ASResult<RouterService> {
         Ok(RouterService {
-            ps_client: PsClient::new(conf),
+            ps_client: Arc::new(PsClient::new(conf)),
         })
     }
 
@@ -60,8 +60,8 @@ impl RouterService {
         sort: Vec<Order>,
     ) -> ASResult<SearchDocumentResponse> {
         self.ps_client
-            .search(
-                collection_names[0].as_str(),
+            .multiple_search(
+                collection_names,
                 QueryRequest {
                     cpids: vec![],
                     query: query,

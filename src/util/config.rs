@@ -225,7 +225,7 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 name: String::from("chubaodb"),
                 ip: String::from("127.0.0.1"),
                 log: String::from("log/"),
-                log_level: String::from("debug"),
+                log_level: String::from("info"),
                 log_limit_bytes: default_log_limit_bytes(),
                 log_file_count: default_log_file_count(),
                 shared_disk: true,

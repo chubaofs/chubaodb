@@ -160,7 +160,8 @@ pub fn key_type(key: &Vec<u8>) -> &'static str {
         1 => "SN_KEY",
         2 => "doc_id",
         3 => "doc_id",
-        4 => "field",
+        4 => "vector",
+        5 => "scalar",
         _ => "unknow",
     }
 }
@@ -169,11 +170,29 @@ pub fn iid_coding(iid: u32) -> [u8; 4] {
     u32_slice(iid)
 }
 
-pub fn field_coding(field_name: &str, iid: u32) -> Vec<u8> {
-    let mut arr = Vec::with_capacity(5 + field_name.len());
+pub fn vector_field_coding(field_name: &str, iid: u32) -> Vec<u8> {
+    let mut arr = Vec::with_capacity(6 + field_name.len());
     arr.push(4);
     arr.extend_from_slice(field_name.as_bytes());
-    arr.push(0);
+    arr.push(0); //here may be has bug
+    arr.extend_from_slice(&u32_slice(iid));
+    arr
+}
+
+pub fn scalar_field_coding(field_id: usize, mut value: Vec<u8>, len: usize, iid: u32) -> Vec<u8> {
+    let mut arr = Vec::with_capacity(10 + value.len());
+    arr.push(5);
+    arr.extend_from_slice(&u32_slice(field_id as u32));
+    if len == value.len() {
+        arr.extend_from_slice(&value);
+    } else if len < value.len() {
+        arr.extend_from_slice(&value[..len]);
+    } else {
+        unsafe {
+            value.set_len(len);
+        }
+        arr.extend_from_slice(&value);
+    }
     arr.extend_from_slice(&u32_slice(iid));
     arr
 }
@@ -186,7 +205,7 @@ pub fn key_coding(id: &str, sort_key: &str) -> Vec<u8> {
         return arr;
     }
 
-    let mut arr = Vec::with_capacity(6 + id.len() + sort_key.len());
+    let mut arr = Vec::with_capacity(10 + id.len() + sort_key.len());
     arr.push(3);
     arr.extend(hash_str(id).to_be_bytes().to_vec());
     arr.extend_from_slice(id.as_bytes());

@@ -22,8 +22,7 @@ use crate::util::{coding, config::Config, entity::*, error::*};
 use crate::*;
 use async_std::sync::{Mutex, RwLock};
 use log::{debug, error, info, warn};
-use rand::Rng;
-use std::cmp;
+use rand::seq::SliceRandom;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -54,6 +53,39 @@ impl MasterService {
             entity_key::collection_name(collection_name),
             entity_key::collection(c.id),
         ])?;
+
+        //3.offload partition
+        for pid in c.partitions.iter() {
+            if let Err(e) = self.offload_partition(c.id, *pid, 0).await {
+                error!(
+                    "offload collection:{} partition:{} has err:{:?}",
+                    c.id, pid, e
+                );
+            }
+        }
+
+        Ok(c)
+    }
+
+    pub async fn hibernate_collection(&self, collection_name: &str) -> ASResult<Collection> {
+        let _lock = self.collection_lock.lock().await;
+        //1.query collection
+        let mut c: Collection = self.get_collection(collection_name)?;
+
+        match c.status {
+            CollectionStatus::WORKING | CollectionStatus::HIBERNATE => {}
+            _ => {
+                return result!(
+                    Code::ParamError,
+                    "collection:[{}] status is:[{:#?}] can to hibernate",
+                    collection_name,
+                    c.status
+                );
+            }
+        }
+
+        c.status = CollectionStatus::HIBERNATE;
+        self.meta_service.put(&c)?;
 
         //3.offload partition
         for pid in c.partitions.iter() {
@@ -114,62 +146,56 @@ impl MasterService {
             .meta_service
             .list(entity_key::pserver_prefix().as_str())?;
 
-        let need_num = cmp::max(partition_num, partition_replica_num);
-        if need_num as usize > server_list.len() {
+        if partition_replica_num as usize > server_list.len() {
             return result_def!(
                 "need pserver size:{} but all server is:{}",
-                need_num,
+                partition_replica_num,
                 server_list.len()
             );
         }
+
         let mut use_list: Vec<PServer> = Vec::new();
-        let random = rand::thread_rng().gen_range(0, server_list.len());
-        //from list_server find need_num for use
-        let mut index = random % server_list.len();
-        let mut detected_times = 1;
-        loop {
-            let s = server_list.get(index).unwrap();
-            let ok = match self.ps_cli.status(s.addr.as_str()).await {
+        for s in server_list {
+            match self.ps_cli.status(s.get_addr()).await {
                 Ok(gr) => match Code::from_i32(gr.code) {
-                    Code::EngineWillClose => false,
-                    _ => true,
+                    Code::EngineWillClose => warn!("ps:{} will close so skip", s.get_addr()),
+                    _ => use_list.push(s),
                 },
                 Err(e) => {
                     error!("conn ps:{} has err:{:?}", s.addr.as_str(), e);
-                    false
                 }
             };
-            if !ok {
-                continue;
-            }
-            use_list.push(s.clone());
-            if use_list.len() >= need_num as usize || detected_times >= server_list.len() {
-                break;
-            }
-            index += 1;
-            detected_times += 1;
         }
 
-        if need_num as usize > use_list.len() {
+        if partition_replica_num as usize > use_list.len() {
             return result_def!(
                 "need pserver size:{} but available server is:{}",
-                need_num,
+                partition_replica_num,
                 use_list.len()
             );
         }
+
+        let mut all_list = Vec::new();
+        for _ in 0..partition_num {
+            use_list.choose(&mut rand::thread_rng());
+            for i in 0..partition_replica_num {
+                all_list.push(use_list[i as usize].clone());
+            }
+        }
+        drop(use_list);
 
         let mut partitions = Vec::with_capacity(partition_num as usize);
         let mut pids = Vec::with_capacity(partition_num as usize);
         let mut slots = Vec::with_capacity(partition_num as usize);
         let range = u32::max_value() / partition_num;
-        for i in 0..need_num {
-            let server = use_list.get(i as usize).unwrap();
+        for i in 0..partition_num {
+            let server = all_list.get(i as usize).unwrap();
             pids.push(i);
             slots.push(i * range);
             let mut replicas: Vec<Replica> = Vec::new();
             for j in 0..partition_replica_num {
-                let id = use_list
-                    .get((i + j % need_num) as usize)
+                let id = all_list
+                    .get((i * partition_replica_num + j) as usize)
                     .unwrap()
                     .id
                     .unwrap();
@@ -214,38 +240,38 @@ impl MasterService {
                 })
                 .await?;
         }
+
+        let start = crate::util::time::current_millis();
+        for index in 0..partition_num {
+            loop {
+                if let Ok(partition) = self.get_partition(collection.id, index) {
+                    if partition.load_term() > 0 {
+                        break;
+                    } else {
+                        if crate::util::time::current_millis() - start > 120000 {
+                            return result!(Code::Timeout, "crate collection timeout 2m");
+                        }
+                    }
+                } else {
+                    return result!(
+                        Code::InternalErr,
+                        "collection:{} partition:{} not found, it may be a bug",
+                        collection.id,
+                        index
+                    );
+                }
+                debug!("wait collection:{} partition:{}", collection.id, index);
+                crate::sleep!(200);
+            }
+            info!("collection:{} partition:{} init ok", collection.name, index);
+        }
+
         collection.status = CollectionStatus::WORKING;
         self.meta_service.put(&collection)?;
         self.meta_service.put_kv(
             entity_key::collection_name(collection.name.as_str()).as_str(),
             &coding::u32_slice(collection.id)[..],
         )?;
-        let mut index = 0;
-        let start = crate::util::time::current_millis();
-        loop {
-            if let Ok(partition) = self.get_partition(collection.id, index) {
-                if partition.load_term() > 0 {
-                    index += 1;
-                    if index == partition_num {
-                        break;
-                    }
-                } else {
-                    if crate::util::time::current_millis() - start > 120000 {
-                        return result!(Code::Timeout, "crate collection timeout 2m");
-                    }
-                    index = 0;
-                }
-            } else {
-                return result!(
-                    Code::InternalErr,
-                    "collection:{} partition:{} not found, it may be a bug",
-                    collection.id,
-                    index
-                );
-            }
-            debug!("wait collection:{} partition:{}", collection.id, index);
-            crate::sleep!(50);
-        }
         Ok(collection)
     }
 

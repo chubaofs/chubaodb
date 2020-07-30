@@ -26,8 +26,10 @@ use crate::pserver::simba::latch::Latch;
 use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::{
-    coding::{doc_key, field_coding, iid_coding, key_coding, slice_slice},
-    config,
+    coding::{
+        doc_key, iid_coding, key_coding, scalar_field_coding, slice_slice, vector_field_coding,
+    },
+    config, convert,
     entity::*,
     error::*,
     time::current_millis,
@@ -39,6 +41,7 @@ use raft4rs::{error::RaftError, raft::Raft};
 use roaring::RoaringBitmap;
 use rocksdb::WriteBatch;
 use serde_json::Value;
+use std::convert::TryInto;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::SeqCst},
     Arc, RwLock,
@@ -313,12 +316,21 @@ impl Simba {
 
         let mut source: Value = serde_json::from_slice(doc.source.as_slice())?;
 
-        for i in self.base.collection.scalar_field_index.iter() {
+        for i in self.base.collection.index_field.iter() {
             let field = &self.base.collection.fields[*i];
             field.validate(source.get(field.name()))?;
         }
 
-        if self.base.collection.vector_field_index.len() == 0 {
+        for i in self.base.collection.scalar_field.iter() {
+            let field = &self.base.collection.fields[*i];
+            let value = match source.get(field.name()) {
+                Some(v) => convert::json(v)?.try_into()?,
+                None => Vec::new(),
+            };
+            doc.scalars.push(value);
+        }
+
+        if self.base.collection.vector_field.len() == 0 {
             if let Err(error) = doc.encode(&mut buf) {
                 return Err(error.into());
             }
@@ -327,9 +339,9 @@ impl Simba {
 
         let map = source.as_object_mut().unwrap();
 
-        let mut vectors = Vec::with_capacity(self.base.collection.vector_field_index.len());
+        let mut vectors = Vec::with_capacity(self.base.collection.vector_field.len());
 
-        for i in self.base.collection.vector_field_index.iter() {
+        for i in self.base.collection.vector_field.iter() {
             let field = match &self.base.collection.fields[*i] {
                 Field::vector(field) => field,
                 _ => panic!(format!("vector field index has not field index:{}", *i)),
@@ -381,14 +393,29 @@ impl Simba {
                 return self.rocksdb.write_batch(batch);
             }
 
-            if self.base.collection.vector_field_index.len() > 0 {
+            if self.base.collection.vector_field.len() > 0 {
                 let mut pbdoc: Document =
                     Message::decode(prost::bytes::Bytes::from(value.to_vec()))?;
 
                 let vectors = pbdoc.vectors;
                 pbdoc.vectors = Vec::new();
                 for v in vectors {
-                    batch.put(field_coding(&v.name, general_id), slice_slice(&v.vector));
+                    batch.put(
+                        vector_field_coding(&v.name, general_id),
+                        slice_slice(&v.vector),
+                    );
+                }
+
+                let scalars = pbdoc.scalars;
+                pbdoc.scalars = Vec::new();
+                let emtpy = Vec::new();
+                for (i, v) in scalars.into_iter().enumerate() {
+                    if v.len() == 0 {
+                        continue;
+                    }
+                    let id = self.base.collection.scalar_field[i];
+                    let scalar_len = self.base.collection.fields[id].scalar_len();
+                    batch.put(scalar_field_coding(id, v, scalar_len, general_id), &emtpy);
                 }
 
                 let mut buf1 = Vec::new();
