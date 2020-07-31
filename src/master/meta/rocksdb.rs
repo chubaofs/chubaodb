@@ -25,16 +25,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 
-pub struct HARepository {
-    partition_lock: Mutex<u32>,
-    lock: Mutex<u32>,
-    write_lock: RwLock<u32>,
+pub struct RocksDB {
     db: Arc<DB>,
 }
 
-impl HARepository {
+impl RocksDB {
     /// Init method
-    pub fn new(conf: Arc<Config>) -> ASResult<HARepository> {
+    pub fn new(conf: Arc<Config>) -> ASResult<RocksDB> {
         let path = Path::new(&conf.self_master().unwrap().data)
             .join(Path::new("meta"))
             .join(Path::new("db"));
@@ -45,95 +42,13 @@ impl HARepository {
         option.create_if_missing(true);
 
         Ok(HARepository {
-            partition_lock: Mutex::new(1),
-            lock: Mutex::new(1),
-            write_lock: RwLock::new(1),
             db: Arc::new(DB::open(&option, path_dir)?),
         })
-    }
-
-    //to add a lock by master key is key str, value is  u64(timeout_mill) + addr
-    pub fn lock(&self, key: &str, ttl_mill: i64) -> ASResult<String> {
-        let _lock = self.lock.lock().unwrap();
-
-        let key = entity_key::lock(key);
-
-        if let Some(value) = self.db.get(key.as_bytes())? {
-            let time_out = slice_u64(&value) as i64;
-            if current_millis() >= time_out {
-                return result!(Code::ParamError, "has already lockd");
-            }
-        }
-
-        let lease = uuid::Uuid::new_v4().to_string();
-
-        let mut batch = WriteBatch::default();
-
-        let mut value = Vec::new();
-        value.extend((current_millis() + ttl_mill).to_be_bytes().to_vec());
-        value.extend(lease.as_bytes());
-
-        batch.put(key.as_bytes(), value.as_slice());
-        let mut write_options = WriteOptions::default();
-        write_options.disable_wal(false);
-        write_options.set_sync(true);
-        conver(self.db.write_opt(batch, &write_options))?;
-
-        Ok(lease)
-    }
-
-    //The contract lock
-    pub fn lock_keep_alive(&self, key: &str, lease: &str, ttl_mill: i64) -> ASResult<()> {
-        let _lock = self.lock.lock().unwrap();
-
-        let key = entity_key::lock(key);
-
-        match self.db.get(key.as_bytes())? {
-            Some(v) => {
-                let time_out = slice_u64(&v);
-                if String::from_utf8_lossy(&v[8..]) != lease {
-                    return result!(Code::LockedLeaseExpried, "lease not locked for key");
-                }
-
-                if current_millis() >= time_out as i64 {
-                    return result!(Code::LockedLeaseExpried, "lease is expried");
-                }
-            }
-            None => return result!(Code::LockedLeaseExpried, "not locked for key"),
-        };
-
-        let mut batch = WriteBatch::default();
-
-        let mut value = Vec::new();
-        value.extend((current_millis() + ttl_mill).to_be_bytes().to_vec());
-        value.extend(lease.as_bytes());
-
-        batch.put(key.as_bytes(), value.as_slice());
-        self.do_write_batch(batch)
-    }
-
-    pub fn unlock(&self, key: &str, lease: &str) -> ASResult<()> {
-        let _lock = self.lock.lock().unwrap();
-
-        let key = entity_key::lock(key);
-
-        match self.db.get(key.as_bytes())? {
-            Some(v) => {
-                if String::from_utf8_lossy(&v[8..]) != lease {
-                    return result!(Code::LockedLeaseExpried, "lease not locked for key");
-                }
-            }
-            None => return result!(Code::LockedLeaseExpried, "not locked for key"),
-        };
-        let mut batch = WriteBatch::default();
-        batch.delete(key);
-        self.do_write_batch(batch)
     }
 
     pub fn create<T: Serialize + MakeKey>(&self, value: &T) -> ASResult<()> {
         let key = value.make_key();
         let key = key.as_str();
-        let _lock = self.write_lock.write().unwrap();
         match self.do_get(key) {
             Ok(_) => return result!(Code::AlreadyExists, "the key:{} already exists", key),
             Err(e) => {
