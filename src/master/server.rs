@@ -31,7 +31,9 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
     };
 
     let service = Arc::new(
-        MasterService::new(conf.clone()).expect(format!("master service init err").as_str()),
+        MasterService::new(conf.clone())
+            .await
+            .expect(format!("master service init err").as_str()),
     );
 
     let schema = Schema::build(Query, Mutation, EmptySubscription)
@@ -39,6 +41,7 @@ pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Re
         .finish();
 
     info!("master listening on http://0.0.0.0:{}", http_port);
+
     HttpServer::new(move || {
         App::new()
             .data(service.clone())

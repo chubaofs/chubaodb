@@ -38,7 +38,7 @@ uuid = { version = "0.8", features = ["v4"] }
 itertools = "0.9.0"
 rocksdb = { version = "0.14.0", features = ["lz4"] }
 tantivy = "0.12.0"
-raft4rs = "0.1.1"
+raft4rs = "0.1.2"
 rand = "0.7.3"
 roaring = "0.6.0"
 num_enum = "0.5.0"

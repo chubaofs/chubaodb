@@ -16,3 +16,4 @@ docker/build
 .history/
 .DS_Store
 cmake-build-debug/CMakeFiles/clion-log.txt
+.pytest_cache/

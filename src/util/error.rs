@@ -1,6 +1,7 @@
 use crate::pserverpb::*;
 use log::error;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use raft4rs::error::{RaftError, RaftResult};
 use serde_json::json;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -245,6 +246,12 @@ impl Into<SearchDocumentResponse> for ASError {
                 message: self.to_string(),
             }),
         }
+    }
+}
+
+impl Into<RaftError> for ASError {
+    fn into(self) -> RaftError {
+        RaftError::Error(self.to_string())
     }
 }
 

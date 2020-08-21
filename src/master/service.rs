@@ -14,7 +14,7 @@
 use crate::client::partition_client::PartitionClient;
 use crate::client::ps_client::PsClient;
 use crate::master::cmd::*;
-use crate::master::meta::repository::HARepository;
+use crate::master::meta::HARepository;
 use crate::pserverpb::*;
 use crate::sleep;
 use crate::util::time::*;
@@ -34,10 +34,10 @@ pub struct MasterService {
 }
 
 impl MasterService {
-    pub fn new(conf: Arc<Config>) -> ASResult<MasterService> {
+    pub async fn new(conf: Arc<Config>) -> ASResult<MasterService> {
         Ok(MasterService {
             ps_cli: PsClient::new(conf.clone()),
-            meta_service: HARepository::new(conf)?,
+            meta_service: HARepository::new(conf).await?,
             partition_lock: RwLock::new(0),
             collection_lock: Mutex::new(0),
         })
@@ -46,13 +46,15 @@ impl MasterService {
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let _lock = self.collection_lock.lock().await;
         //1.query collection
-        let c: Collection = self.get_collection(collection_name)?;
+        let c: Collection = self.get_collection(collection_name).await?;
 
         //delete collection
-        self.meta_service.delete_keys(vec![
-            entity_key::collection_name(collection_name),
-            entity_key::collection(c.id),
-        ])?;
+        self.meta_service
+            .delete_keys(vec![
+                entity_key::collection_name(collection_name),
+                entity_key::collection(c.id),
+            ])
+            .await?;
 
         //3.offload partition
         for pid in c.partitions.iter() {
@@ -70,7 +72,7 @@ impl MasterService {
     pub async fn hibernate_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let _lock = self.collection_lock.lock().await;
         //1.query collection
-        let mut c: Collection = self.get_collection(collection_name)?;
+        let mut c: Collection = self.get_collection(collection_name).await?;
 
         match c.status {
             CollectionStatus::WORKING | CollectionStatus::HIBERNATE => {}
@@ -85,7 +87,7 @@ impl MasterService {
         }
 
         c.status = CollectionStatus::HIBERNATE;
-        self.meta_service.put(&c)?;
+        self.meta_service.put(&c).await?;
 
         //3.offload partition
         for pid in c.partitions.iter() {
@@ -107,7 +109,7 @@ impl MasterService {
         collection.validate()?;
 
         //check collection exists
-        match self.get_collection(&collection.name) {
+        match self.get_collection(&collection.name).await {
             Ok(_) => {
                 return result!(
                     Code::AlreadyExists,
@@ -122,7 +124,10 @@ impl MasterService {
             }
         }
 
-        let seq = self.meta_service.increase_id(entity_key::SEQ_COLLECTION)?;
+        let seq = self
+            .meta_service
+            .increase_id(entity_key::SEQ_COLLECTION)
+            .await?;
 
         info!("no coresponding collection found, begin to create connection ");
         info!("all fields valid.");
@@ -144,7 +149,8 @@ impl MasterService {
 
         let server_list: Vec<PServer> = self
             .meta_service
-            .list(entity_key::pserver_prefix().as_str())?;
+            .list(entity_key::pserver_prefix().as_str())
+            .await?;
 
         if partition_replica_num as usize > server_list.len() {
             return result_def!(
@@ -220,8 +226,8 @@ impl MasterService {
 
         info!("prepare add collection partitions len:{}", partitions.len());
 
-        self.meta_service.create(&collection)?;
-        self.meta_service.put_batch(&partitions)?;
+        self.meta_service.create(&collection).await?;
+        self.meta_service.put_batch(&partitions).await?;
         for c in partitions {
             let mut replicas: Vec<ReplicaInfo> = vec![];
             for r in c.replicas {
@@ -244,7 +250,7 @@ impl MasterService {
         let start = crate::util::time::current_millis();
         for index in 0..partition_num {
             loop {
-                if let Ok(partition) = self.get_partition(collection.id, index) {
+                if let Ok(partition) = self.get_partition(collection.id, index).await {
                     if partition.load_term() > 0 {
                         break;
                     } else {
@@ -267,18 +273,21 @@ impl MasterService {
         }
 
         collection.status = CollectionStatus::WORKING;
-        self.meta_service.put(&collection)?;
-        self.meta_service.put_kv(
-            entity_key::collection_name(collection.name.as_str()).as_str(),
-            &coding::u32_slice(collection.id)[..],
-        )?;
+        self.meta_service.put(&collection).await?;
+        self.meta_service
+            .put_kv(
+                entity_key::collection_name(collection.name.as_str()).as_str(),
+                &coding::u32_slice(collection.id)[..],
+            )
+            .await?;
         Ok(collection)
     }
 
-    pub fn get_collection(&self, collection_name: &str) -> ASResult<Collection> {
+    pub async fn get_collection(&self, collection_name: &str) -> ASResult<Collection> {
         let value = self
             .meta_service
             .get_kv(entity_key::collection_name(collection_name).as_str())
+            .await
             .map_err(|e| {
                 if e.code() == Code::RocksDBNotFound {
                     err!(
@@ -292,11 +301,13 @@ impl MasterService {
             })?;
 
         self.get_collection_by_id(coding::slice_u32(&value[..]))
+            .await
     }
 
-    pub fn get_collection_by_id(&self, collection_id: u32) -> ASResult<Collection> {
+    pub async fn get_collection_by_id(&self, collection_id: u32) -> ASResult<Collection> {
         self.meta_service
             .get(entity_key::collection(collection_id).as_str())
+            .await
             .map_err(|e| {
                 if e.code() == Code::RocksDBNotFound {
                     err!(
@@ -310,25 +321,28 @@ impl MasterService {
             })
     }
 
-    pub fn list_collections(&self) -> ASResult<Vec<Collection>> {
+    pub async fn list_collections(&self) -> ASResult<Vec<Collection>> {
         self.meta_service
             .list(entity_key::collection_prefix().as_str())
+            .await
     }
 
-    pub fn update_server(&self, mut server: PServer) -> ASResult<PServer> {
+    pub async fn update_server(&self, mut server: PServer) -> ASResult<PServer> {
         server.modify_time = current_millis();
-        self.meta_service.put(&server)?;
+        self.meta_service.put(&server).await?;
         return Ok(server);
     }
 
-    pub fn list_servers(&self) -> ASResult<Vec<PServer>> {
+    pub async fn list_servers(&self) -> ASResult<Vec<PServer>> {
         self.meta_service
             .list(entity_key::pserver_prefix().as_str())
+            .await
     }
 
-    pub fn get_server(&self, server_addr: &str) -> ASResult<PServer> {
+    pub async fn get_server(&self, server_addr: &str) -> ASResult<PServer> {
         self.meta_service
             .get(entity_key::pserver(server_addr).as_str())
+            .await
             .map_err(|e| {
                 if e.code() == Code::RocksDBNotFound {
                     err!(
@@ -342,24 +356,31 @@ impl MasterService {
             })
     }
 
-    pub fn register(&self, mut server: PServer) -> ASResult<PServer> {
-        match self.get_server(server.addr.clone().as_ref()) {
+    pub async fn register(&self, mut server: PServer) -> ASResult<PServer> {
+        match self.get_server(server.addr.clone().as_ref()).await {
             Ok(ps) => Ok(ps),
             Err(e) => {
                 if e.code() != Code::PServerNotFound {
                     return Err(e);
                 }
-                let seq = self.meta_service.increase_id(entity_key::SEQ_PSERVER)?;
+                let seq = self
+                    .meta_service
+                    .increase_id(entity_key::SEQ_PSERVER)
+                    .await?;
                 server.id = Some(seq);
 
-                match self.meta_service.put_kv(
-                    &entity_key::pserver_id(seq).as_str(),
-                    &server.addr.as_bytes(),
-                ) {
+                match self
+                    .meta_service
+                    .put_kv(
+                        &entity_key::pserver_id(seq).as_str(),
+                        &server.addr.as_bytes(),
+                    )
+                    .await
+                {
                     Ok(_) => {}
                     Err(e) => return Err(e),
                 }
-                match self.meta_service.create(&server) {
+                match self.meta_service.create(&server).await {
                     Ok(_) => {
                         return Ok(server);
                     }
@@ -367,7 +388,7 @@ impl MasterService {
                         if e.code() != Code::AlreadyExists {
                             return Err(e);
                         }
-                        match self.get_server(&server.addr.as_str()) {
+                        match self.get_server(&server.addr.as_str()).await {
                             Ok(pserver) => {
                                 return Ok(pserver);
                             }
@@ -379,10 +400,11 @@ impl MasterService {
         }
     }
 
-    pub fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
+    pub async fn get_server_addr(&self, server_id: u32) -> ASResult<String> {
         match self
             .meta_service
             .get_kv(entity_key::pserver_id(server_id).as_str())
+            .await
         {
             Ok(v) => match String::from_utf8(v) {
                 Ok(v) => Ok(v),
@@ -392,10 +414,11 @@ impl MasterService {
         }
     }
 
-    pub fn list_partitions(&self, collection_name: &str) -> ASResult<Vec<Partition>> {
+    pub async fn list_partitions(&self, collection_name: &str) -> ASResult<Vec<Partition>> {
         let value = self
             .meta_service
             .get_kv(entity_key::collection_name(collection_name).as_str())
+            .await
             .map_err(|e| {
                 if e.code() == Code::RocksDBNotFound {
                     err!(
@@ -409,16 +432,23 @@ impl MasterService {
             })?;
 
         self.list_partitions_by_id(coding::slice_u32(&value[..]))
+            .await
     }
 
-    pub fn list_partitions_by_id(&self, collection_id: u32) -> ASResult<Vec<Partition>> {
+    pub async fn list_partitions_by_id(&self, collection_id: u32) -> ASResult<Vec<Partition>> {
         self.meta_service
             .list(entity_key::partition_prefix(collection_id).as_str())
+            .await
     }
 
-    pub fn get_partition(&self, collection_id: u32, partition_id: u32) -> ASResult<Partition> {
+    pub async fn get_partition(
+        &self,
+        collection_id: u32,
+        partition_id: u32,
+    ) -> ASResult<Partition> {
         self.meta_service
             .get(entity_key::partiition(collection_id, partition_id).as_str())
+            .await
     }
 
     pub async fn transfer_partition(&self, mut ptransfer: PTransfer) -> ASResult<()> {
@@ -434,7 +464,7 @@ impl MasterService {
 
         self.ps_cli.status(to_server).await?; //validate can be transfer
 
-        let old_partition = self.get_partition(cid, pid)?;
+        let old_partition = self.get_partition(cid, pid).await?;
         let (old_term, old_addr) = (old_partition.load_term(), old_partition.leader);
 
         for i in 0..100 as u8 {
@@ -494,7 +524,7 @@ impl MasterService {
             collection_id, partition_id
         );
 
-        let partition = self.get_partition(collection_id, partition_id)?;
+        let partition = self.get_partition(collection_id, partition_id).await?;
 
         //check version
         if partition.load_term() > term {
@@ -507,7 +537,7 @@ impl MasterService {
         }
 
         // load begin to try offload partition, try not to repeat the load
-        for ps in self.list_servers()? {
+        for ps in self.list_servers().await? {
             for wp in ps.write_partitions {
                 if (wp.collection_id, wp.id) == (collection_id, partition_id) {
                     return result!(
@@ -536,7 +566,7 @@ impl MasterService {
         partition_id: u32,
         term: u64,
     ) -> ASResult<()> {
-        for ps in self.list_servers()? {
+        for ps in self.list_servers().await? {
             for wp in ps.write_partitions {
                 if (wp.collection_id, wp.id) == (collection_id, partition_id) {
                     PartitionClient::new(ps.addr.clone())
@@ -552,7 +582,7 @@ impl MasterService {
             }
         }
 
-        let par = self.get_partition(collection_id, partition_id)?;
+        let par = self.get_partition(collection_id, partition_id).await?;
 
         PartitionClient::new(par.leader.clone())
             .offload_partition(PartitionRequest {
@@ -569,7 +599,10 @@ impl MasterService {
 
     pub async fn update_partition(&self, partition: Partition) -> ASResult<()> {
         let _lock = self.partition_lock.write().await;
-        match self.get_partition(partition.collection_id, partition.id) {
+        match self
+            .get_partition(partition.collection_id, partition.id)
+            .await
+        {
             Ok(p) => {
                 if p.load_term() > partition.load_term() {
                     return result!(
@@ -588,7 +621,7 @@ impl MasterService {
                 }
             }
         }
-        self.meta_service.put(&partition)
+        self.meta_service.put(&partition).await
     }
 }
 

@@ -367,7 +367,7 @@ impl Simba {
     }
 
     async fn raft_write(&self, event: Event, raft: Arc<Raft>) -> ASResult<()> {
-        match raft.submit(event.encode()).await {
+        match raft.submit(event.encode(), true).await {
             Ok(()) => Ok(()),
             Err(e) => match e {
                 RaftError::ErrCode(c, m) => Err(ASError::Error(Code::from_i32(c), m)),

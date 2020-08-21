@@ -818,11 +818,6 @@ pub mod entity_key {
     pub fn collection_name(collection_name: &str) -> String {
         format!("META/MAPPING/COLLECTION/{}", collection_name)
     }
-
-    /// META_LOCK_/{collection_name}
-    pub fn lock(key: &str) -> String {
-        format!("META/LOCK/{}", key)
-    }
 }
 
 #[test]

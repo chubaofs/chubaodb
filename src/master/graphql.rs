@@ -58,7 +58,7 @@ impl Mutation {
         info!("prepare to heartbeat with address {}, zone {}", addr, zone);
 
         let service = ctx.data_unchecked::<Arc<MasterService>>();
-        let mut ps = match service.register(ps) {
+        let mut ps = match service.register(ps).await {
             Ok(s) => s,
             Err(e) => {
                 error!(
@@ -80,7 +80,7 @@ impl Mutation {
         let mut active_ids = Vec::new();
 
         for wp in ps.write_partitions {
-            match service.get_partition(wp.collection_id, wp.id) {
+            match service.get_partition(wp.collection_id, wp.id).await {
                 Ok(dbc) => {
                     if dbc.leader == ps.addr && dbc.load_term() <= wp.load_term() {
                         active_ids.push(dbc);
@@ -226,6 +226,7 @@ impl Mutation {
         match ctx
             .data_unchecked::<Arc<MasterService>>()
             .update_server(info)
+            .await
         {
             Ok(s) => {
                 println!(
@@ -272,7 +273,8 @@ impl Query {
     async fn collection_list(&self, ctx: &Context<'_>) -> FieldResult<JsonValue> {
         return Ok(Json(serde_json::to_value(
             ctx.data_unchecked::<Arc<MasterService>>()
-                .list_collections()?,
+                .list_collections()
+                .await?,
         )?));
     }
 
@@ -287,6 +289,7 @@ impl Query {
             match ctx
                 .data_unchecked::<Arc<MasterService>>()
                 .get_collection_by_id(collection_id as u32)
+                .await
             {
                 Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
                 Err(e) => {
@@ -305,6 +308,7 @@ impl Query {
             match ctx
                 .data_unchecked::<Arc<MasterService>>()
                 .get_collection(&collection_name)
+                .await
             {
                 Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
                 Err(e) => {
@@ -336,6 +340,7 @@ impl Query {
         Ok(Json(serde_json::to_value(
             ctx.data_unchecked::<Arc<MasterService>>()
                 .list_servers()
+                .await
                 .unwrap(),
         )?))
     }
@@ -344,7 +349,7 @@ impl Query {
         info!("prepare to get pservers addr by server id");
         let service = ctx.data_unchecked::<Arc<MasterService>>();
 
-        let addr = match service.get_server_addr(id) {
+        let addr = match service.get_server_addr(id).await {
             Ok(s) => s,
             Err(e) => {
                 let info = format!("get server by id has err, err: {}", e.to_string());
@@ -353,7 +358,7 @@ impl Query {
             }
         };
 
-        match service.get_server(addr.as_str()) {
+        match service.get_server(addr.as_str()).await {
             Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
             Err(e) => {
                 error!("get server failed, id:{}, err:{}", id, e.to_string());
@@ -377,6 +382,7 @@ impl Query {
         match ctx
             .data_unchecked::<Arc<MasterService>>()
             .get_partition(collection_id as u32, partition_id as u32)
+            .await
         {
             Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
             Err(e) => {
@@ -404,6 +410,7 @@ impl Query {
         match ctx
             .data_unchecked::<Arc<MasterService>>()
             .list_partitions(&collection_name)
+            .await
         {
             Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
             Err(e) => {
