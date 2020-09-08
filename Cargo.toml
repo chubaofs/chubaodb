@@ -13,39 +13,39 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-log = "0.4.8"
-log4rs = "0.12.0"
-clap = "2.33.1"
-chrono = "0.4.13"
+log = "0.4.11"
+log4rs = "0.13.0"
+clap = "2.33.3"
+chrono = "0.4.15"
 backtrace = "0.3"
 toml = "0.5.6"
 actix-web = "2.0.0"
-async-trait = "0.1.36"
-async-graphql = "1.16.14"
-async-graphql-actix-web = "1.16.10"
+async-trait = "0.1.40"
+async-graphql = "1.17.21"
+async-graphql-actix-web = "1.17.18"
 actix-rt = "1.1.1"
 http = "0.2.1"
-tonic = { version = "0.3.0", features = ["tls"] }
-async-std = { version = "1.6.2", features = ["default", "unstable", "tokio02"]}
+tonic = { version = "0.3.1", features = ["tls"] }
+async-std = { version = "1.6.3", features = ["default", "unstable", "tokio02"]}
 prost = "0.6.1"
-serde = { version = "1.0.114" }
-serde_derive = "1.0.114"
+serde = { version = "1.0.115" }
+serde_derive = "1.0.115"
 serde_json = "1.0.57"
 base64 = "0.12.3"
 reqwest = { version = "0.10", features = ["json", "blocking"],default-features=false }
 git-version = "0.3.4"
 uuid = { version = "0.8", features = ["v4"] }
 itertools = "0.9.0"
-rocksdb = { version = "0.14.0", features = ["lz4"] }
-tantivy = "0.12.0"
-raft4rs = "0.1.2"
+rocksdb = { version = "0.15.0", features = ["lz4"] }
+tantivy = "0.13.0"
+raft4rs = "0.1.3"
 rand = "0.7.3"
 roaring = "0.6.0"
-num_enum = "0.5.0"
+num_enum = "0.5.1"
 faiss4rs = {version = "1.6.307" , optional = true}
 
 [build-dependencies]
-tonic-build = "0.3.0"
+tonic-build = "0.3.1"
 
 
 [features]

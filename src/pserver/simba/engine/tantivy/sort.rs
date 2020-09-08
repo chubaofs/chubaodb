@@ -155,7 +155,7 @@ pub struct FieldReader {
 type FieldFastReader = Vec<FieldReader>;
 
 impl CustomSegmentScorer<FieldScore> for FieldFastReader {
-    fn score(&self, doc: DocId) -> FieldScore {
+    fn score(&mut self, doc: DocId) -> FieldScore {
         let mut fs = FieldScore::new(self.len());
         for fr in self.iter() {
             let mut v = fr.reader.get_bytes(doc).to_vec();
