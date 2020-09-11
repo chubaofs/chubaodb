@@ -2,6 +2,7 @@ use crate::master::meta::db::RocksDB;
 use crate::util::error::ASError;
 use crate::util::{coding::*, config::Config, entity::*};
 use async_std::task;
+use async_trait::async_trait;
 use log::error;
 use raft4rs::{
     entity::Config as RaftConfig, error::*, raft::Raft, server::Server, state_machine::*,
@@ -53,6 +54,7 @@ impl MasterStateMachine {
     }
 }
 
+#[async_trait]
 impl StateMachine for MasterStateMachine {
     fn apply_log(&self, _term: u64, _index: u64, command: &[u8]) -> RaftResult<()> {
         let cmd: Command =
@@ -88,7 +90,7 @@ impl StateMachine for MasterStateMachine {
         }
     }
 
-    fn apply_member_change(
+    async fn apply_member_change(
         &self,
         _term: u64,
         _index: u64,
@@ -99,7 +101,7 @@ impl StateMachine for MasterStateMachine {
         panic!()
     }
 
-    fn apply_leader_change(&self, term: u64, _index: u64, leader: u64) -> RaftResult<()> {
+    async fn apply_leader_change(&self, term: u64, _index: u64, leader: u64) -> RaftResult<()> {
         Ok(())
     }
 }

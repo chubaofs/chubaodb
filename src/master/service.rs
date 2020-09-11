@@ -266,20 +266,22 @@ impl MasterService {
                         index
                     );
                 }
-                debug!("wait collection:{} partition:{}", collection.id, index);
+                info!("wait collection:{} partition:{}", collection.id, index);
                 crate::sleep!(200);
             }
             info!("collection:{} partition:{} init ok", collection.name, index);
         }
-
+        println!("========================================");
         collection.status = CollectionStatus::WORKING;
         self.meta_service.put(&collection).await?;
+        println!("========================================123123123xxxxxxx");
         self.meta_service
             .put_kv(
                 entity_key::collection_name(collection.name.as_str()).as_str(),
                 &coding::u32_slice(collection.id)[..],
             )
             .await?;
+        println!("========================================123123123");
         Ok(collection)
     }
 

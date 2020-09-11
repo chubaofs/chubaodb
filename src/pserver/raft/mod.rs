@@ -2,8 +2,9 @@ use crate::client::meta_client::MetaClient;
 use crate::pserver::service::PartitionService;
 use crate::pserver::simba::simba::Simba;
 use crate::util::error::ASError;
-use crate::util::{coding::*, config, entity::*};
+use crate::util::{coding::*, config, entity::*, error::Code::InternalErr};
 use async_std::task;
+use async_trait::async_trait;
 use log::error;
 use raft4rs::{entity::Config, error::*, state_machine::*};
 use std::sync::{Arc, Mutex};
@@ -36,6 +37,7 @@ impl NodeStateMachine {
     }
 }
 
+#[async_trait]
 impl StateMachine for NodeStateMachine {
     fn apply_log(&self, _term: u64, index: u64, command: &[u8]) -> RaftResult<()> {
         if let Some(simba) = &self.simba {
@@ -48,7 +50,7 @@ impl StateMachine for NodeStateMachine {
         }
     }
 
-    fn apply_member_change(
+    async fn apply_member_change(
         &self,
         _term: u64,
         _index: u64,
@@ -59,12 +61,12 @@ impl StateMachine for NodeStateMachine {
         panic!()
     }
 
-    fn apply_leader_change(&self, term: u64, _index: u64, leader: u64) -> RaftResult<()> {
+    async fn apply_leader_change(&self, term: u64, _index: u64, leader: u64) -> RaftResult<()> {
         {
             let _lock = self.term_lock.lock().unwrap();
             if self.partition.load_term() > term {
                 return Err(RaftError::ErrCode(
-                    500,
+                    InternalErr.into(),
                     format!(
                         "apply leader change has err:[term:{} less:{}]",
                         term,
@@ -75,11 +77,11 @@ impl StateMachine for NodeStateMachine {
             self.partition.set_term(term);
         }
 
-        if let Err(e) = task::block_on(self.ps.apply_leader_change(
-            &self.collection,
-            &self.partition,
-            leader,
-        )) {
+        if let Err(e) = self
+            .ps
+            .apply_leader_change(&self.collection, &self.partition, leader)
+            .await
+        {
             error!("apply leader change has err:{}", e);
             return Err(RaftError::ErrCode(e.code() as i32, e.message()));
         };

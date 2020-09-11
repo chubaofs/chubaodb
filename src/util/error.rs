@@ -138,6 +138,7 @@ pub enum Code {
     EncodingErr,
     DencodingErr,
     Timeout,
+    SerdeErr,
 }
 
 impl Code {
@@ -224,9 +225,78 @@ impl std::fmt::Display for ASError {
     }
 }
 
-impl<T: Error> From<T> for ASError {
-    fn from(t: T) -> Self {
-        ASError::Error(Code::HttpAPIRequestErr, t.to_string())
+impl From<RaftError> for ASError {
+    fn from(e: RaftError) -> Self {
+        match e {
+            RaftError::ErrCode(c, s) => err!(c, s),
+            _ => err!(Code::InternalErr, e.to_string()),
+        }
+    }
+}
+
+impl From<serde_json::Error> for ASError {
+    fn from(e: serde_json::Error) -> Self {
+        err!(Code::SerdeErr, e.to_string())
+    }
+}
+
+impl From<prost::DecodeError> for ASError {
+    fn from(e: prost::DecodeError) -> Self {
+        err!(Code::DencodingErr, e.to_string())
+    }
+}
+
+impl From<prost::EncodeError> for ASError {
+    fn from(e: prost::EncodeError) -> Self {
+        err!(Code::EncodingErr, e.to_string())
+    }
+}
+
+impl From<tantivy::directory::error::OpenDirectoryError> for ASError {
+    fn from(e: tantivy::directory::error::OpenDirectoryError) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<std::io::Error> for ASError {
+    fn from(e: std::io::Error) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<rocksdb::Error> for ASError {
+    fn from(e: rocksdb::Error) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<http::uri::InvalidUri> for ASError {
+    fn from(e: http::uri::InvalidUri) -> Self {
+        err!(Code::ParamError, e.to_string())
+    }
+}
+
+impl From<tonic::transport::Error> for ASError {
+    fn from(e: tonic::transport::Error) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<reqwest::Error> for ASError {
+    fn from(e: reqwest::Error) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<tonic::Status> for ASError {
+    fn from(e: tonic::Status) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<async_std::sync::RecvError> for ASError {
+    fn from(e: async_std::sync::RecvError) -> Self {
+        err!(Code::InternalErr, e.to_string())
     }
 }
 
@@ -251,7 +321,7 @@ impl Into<SearchDocumentResponse> for ASError {
 
 impl Into<RaftError> for ASError {
     fn into(self) -> RaftError {
-        RaftError::Error(self.to_string())
+        RaftError::ErrCode(self.code().into(), self.message())
     }
 }
 
