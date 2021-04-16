@@ -1,7 +1,7 @@
 use std::sync::{mpsc::Sender, Arc};
 
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
-use log::{error, info};
+use tracing::log::{error, info};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

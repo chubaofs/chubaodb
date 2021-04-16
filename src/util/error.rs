@@ -1,7 +1,6 @@
 use crate::pserverpb::*;
-use log::error;
+use tracing::log::error;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use raft4rs::error::{RaftError, RaftResult};
 use serde_json::json;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -12,8 +11,8 @@ pub type ASResult<T> = std::result::Result<T, ASError>;
 macro_rules! err {
     ($code:expr , $arg:expr) => {{
         use std::convert::TryFrom;
-        use log::log_enabled;
-        use log::Level::Debug;
+        use tracing::log::log_enabled;
+        use tracing::log::Level::Debug;
         let code = match Code::try_from($code) {
             Ok(c) => c,
             Err(_) => Code::InvalidErr,
@@ -28,8 +27,8 @@ macro_rules! err {
     }};
     ($code:expr , $($arg:tt)*) => {{
         use std::convert::TryFrom;
-        use log::log_enabled;
-        use log::Level::Debug;
+        use tracing::log::log_enabled;
+        use tracing::log::Level::Debug;
         let code = match Code::try_from($code) {
             Ok(c) => c,
             Err(_) => Code::InvalidErr,
@@ -46,8 +45,8 @@ macro_rules! err {
 #[macro_export]
 macro_rules! err_def {
     ($arg:expr) => {{
-        use log::log_enabled;
-        use log::Level::Debug;
+        use tracing::log::log_enabled;
+        use tracing::log::Level::Debug;
         if log_enabled!(Debug) {
             ASError::Error(Code::InternalErr, format!("{} trace:{:?}", $arg, ASError::trace()))
         }else{
@@ -55,8 +54,8 @@ macro_rules! err_def {
         }
     }};
     ($($arg:tt)*) => {{
-        use log::log_enabled;
-        use log::Level::Debug;
+        use tracing::log::log_enabled;
+        use tracing::log::Level::Debug;
         if log_enabled!(Debug) {
             let msg = format!($($arg)*) ;
             ASError::Error(Code::InternalErr, format!("{} trace:{:?}", msg, ASError::trace()))
@@ -225,14 +224,6 @@ impl std::fmt::Display for ASError {
     }
 }
 
-impl From<RaftError> for ASError {
-    fn from(e: RaftError) -> Self {
-        match e {
-            RaftError::ErrCode(c, s) => err!(c, s),
-            _ => err!(Code::InternalErr, e.to_string()),
-        }
-    }
-}
 
 impl From<serde_json::Error> for ASError {
     fn from(e: serde_json::Error) -> Self {
@@ -294,11 +285,6 @@ impl From<tonic::Status> for ASError {
     }
 }
 
-impl From<async_std::sync::RecvError> for ASError {
-    fn from(e: async_std::sync::RecvError) -> Self {
-        err!(Code::InternalErr, e.to_string())
-    }
-}
 
 pub fn cast<E: std::fmt::Display>(e: E) -> ASError {
     ASError::Error(Code::InternalErr, e.to_string())
@@ -319,11 +305,6 @@ impl Into<SearchDocumentResponse> for ASError {
     }
 }
 
-impl Into<RaftError> for ASError {
-    fn into(self) -> RaftError {
-        RaftError::ErrCode(self.code().into(), self.message())
-    }
-}
 
 impl Into<AggregationResponse> for ASError {
     fn into(self) -> AggregationResponse {

@@ -13,7 +13,7 @@
 // permissions and limitations under the License.
 use crate::util::net::MyIp;
 use git_version::git_version;
-use log::{info, LevelFilter};
+use tracing::log::{info, LevelFilter};
 use log4rs::{
     append::{
         console::{ConsoleAppender, Target},

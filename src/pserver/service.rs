@@ -12,36 +12,28 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
-use crate::pserver::raft::*;
 use crate::pserver::simba::aggregation;
 use crate::pserver::simba::engine::tantivy::sort::FieldScore;
 use crate::pserver::simba::simba::Simba;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use crate::*;
-use async_std::{sync::channel, task};
-use log::{error, info};
-use raft4rs::{
-    entity::{Decode, Entry},
-    error::*,
-    raft::Raft,
-    server::Server as RaftServer,
-};
+use tokio::sync::mpsc::channel;
+use tracing::log::{error, info};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, Ordering::SeqCst},
     Arc, Mutex, RwLock,
 };
+
 enum Store {
     Leader {
         partition: Arc<Partition>,
-        raft: Arc<Raft>,
         simba: Arc<Simba>,
     },
     Member {
         partition: Arc<Partition>,
-        raft: Arc<Raft>,
         simba: Arc<Simba>,
     },
 }
@@ -54,9 +46,9 @@ impl Store {
         }
     }
 
-    fn leader_simba(&self) -> ASResult<(Arc<Simba>, Arc<Raft>)> {
+    fn leader_simba(&self) -> ASResult<(Arc<Simba>)> {
         match self {
-            Self::Leader { simba, raft, .. } => Ok((simba.clone(), raft.clone())),
+            Self::Leader { simba, .. } => Ok((simba.clone())),
             _ => result!(Code::PartitionNotLeader, "simba partition not leader"),
         }
     }
@@ -67,11 +59,6 @@ impl Store {
         }
     }
 
-    fn raft(&self) -> ASResult<Arc<Raft>> {
-        match self {
-            Self::Leader { raft, .. } | Self::Member { raft, .. } => Ok(raft.clone()),
-        }
-    }
 
     fn partition(&self) -> Arc<Partition> {
         match self {
@@ -86,7 +73,6 @@ pub struct PartitionService {
     pub conf: Arc<config::Config>,
     pub lock: Mutex<usize>,
     meta_client: Arc<MetaClient>,
-    raft_server: Option<RaftServer>,
 }
 
 impl PartitionService {
@@ -97,7 +83,6 @@ impl PartitionService {
             conf: conf.clone(),
             lock: Mutex::new(0),
             meta_client: Arc::new(MetaClient::new(conf)),
-            raft_server: None,
         })
     }
 
@@ -130,12 +115,6 @@ impl PartitionService {
 
         info!("register server line:{:?}", ps);
 
-        let raft_server = RaftServer::new(
-            make_raft_conf(self.server_id.load(SeqCst), &self.conf),
-            NodeResolver::new(self.meta_client.clone()),
-        );
-
-        Arc::get_mut(self).unwrap().raft_server = Some(raft_server);
 
         for wp in ps.write_partitions {
             if let Err(e) = self
@@ -207,33 +186,12 @@ impl PartitionService {
             .map(|r| r.node_id as u64)
             .collect();
 
-        let raft = conver(
-            self.raft_server
-                .as_ref()
-                .unwrap()
-                .create_raft(
-                    coding::merge_u32(collection.id, partition.id),
-                    0,
-                    replicas[0],
-                    &replicas,
-                    NodeStateMachine::new(
-                        Some(simba.clone()),
-                        collection.clone(),
-                        partition.clone(),
-                        self.clone(),
-                    ),
-                )
-                .await,
-        )?;
-
-        self.init_simba_by_raft(&simba, &raft).await?;
 
         self.simba_map.write().unwrap().insert(
             (collection_id, partition_id),
             Arc::new(Store::Member {
                 simba: simba,
                 partition: partition,
-                raft: raft,
             }),
         );
 
@@ -317,7 +275,6 @@ impl PartitionService {
 
             let store = Store::Leader {
                 partition: store.partition(),
-                raft: store.raft()?,
                 simba: store.simba()?,
             };
 
@@ -335,7 +292,6 @@ impl PartitionService {
             } else {
                 Store::Member {
                     partition: partition.clone(),
-                    raft: store.raft()?,
                     simba: store.simba()?,
                 }
             };
@@ -355,24 +311,24 @@ impl PartitionService {
         self.take_heartbeat(partition).await
     }
 
-    async fn init_simba_by_raft(&self, simba: &Arc<Simba>, raft: &Arc<Raft>) -> RaftResult<()> {
-        let index = simba.get_raft_index() + 1;
-        let mut iter = raft.store.iter(index).await?;
-
-        while let Some(body) = iter.next(&raft.store).await? {
-            match Entry::decode(&body)? {
-                Entry::Commit { index, commond, .. } => {
-                    if let Err(e) = simba.do_write(index, &commond, true) {
-                        error!("init raft log has err:{:?} line:{:?}", e, commond);
-                    }
-                }
-                Entry::LeaderChange { .. } => {}
-                Entry::MemberChange { .. } => {
-                    //TODO: member change ........
-                }
-                _ => panic!("not support"),
-            }
-        }
+    async fn init_simba_by_raft(&self, simba: &Arc<Simba>) -> ASResult<()> {
+        // let index = simba.get_raft_index() + 1;
+        // let mut iter = raft.store.iter(index).await?;
+        //
+        // while let Some(body) = iter.next(&raft.store).await? {
+        //     match Entry::decode(&body)? {
+        //         Entry::Commit { index, commond, .. } => {
+        //             if let Err(e) = simba.do_write(index, &commond, true) {
+        //                 error!("init raft log has err:{:?} line:{:?}", e, commond);
+        //             }
+        //         }
+        //         Entry::LeaderChange { .. } => {}
+        //         Entry::MemberChange { .. } => {
+        //             //TODO: member change ........
+        //         }
+        //         _ => panic!("not support"),
+        //     }
+        // }
         Ok(())
     }
 
@@ -414,7 +370,7 @@ impl PartitionService {
     }
 
     pub async fn write(&self, req: WriteDocumentRequest) -> ASResult<GeneralResponse> {
-        let (simba, raft) = if let Some(store) = self
+        let (simba) = if let Some(store) = self
             .simba_map
             .read()
             .unwrap()
@@ -425,7 +381,7 @@ impl PartitionService {
             return Err(make_not_found_err(req.collection_id, req.partition_id)?);
         };
 
-        match simba.write(req, raft).await {
+        match simba.write(req).await {
             Ok(_) | Err(ASError::Success) => Ok(GeneralResponse {
                 code: Code::Success as i32,
                 message: String::from("success"),
@@ -504,7 +460,7 @@ impl PartitionService {
     pub async fn agg(&self, sdreq: QueryRequest) -> ASResult<AggregationResponse> {
         let len = sdreq.cpids.len();
 
-        let (tx, rx) = channel(len);
+        let (tx, mut rx) = channel(len);
 
         let sdreq = Arc::new(sdreq);
 
@@ -515,7 +471,7 @@ impl PartitionService {
                     let simba = simba.clone();
                     let tx = tx.clone();
                     let sdreq = sdreq.clone();
-                    task::spawn(async move {
+                    tokio::spawn(async move {
                         tx.send(simba.agg(sdreq)).await;
                     });
                 } else {
@@ -526,7 +482,7 @@ impl PartitionService {
             }
         }
 
-        let mut dist = rx.recv().await?;
+        let mut dist = rx.recv().await.unwrap();
 
         if sdreq.cpids.len() == 1 {
             return Ok(dist);
@@ -549,7 +505,7 @@ impl PartitionService {
     pub async fn search(&self, sdreq: QueryRequest) -> ASResult<SearchDocumentResponse> {
         let len = sdreq.cpids.len();
 
-        let (tx, rx) = channel(len);
+        let (tx, mut rx) = channel(len);
 
         let sdreq = Arc::new(sdreq);
 
@@ -560,7 +516,7 @@ impl PartitionService {
                     let simba = simba.clone();
                     let tx = tx.clone();
                     let sdreq = sdreq.clone();
-                    task::spawn(async move {
+                    tokio::spawn(async move {
                         tx.send(simba.search(sdreq)).await;
                     });
                 } else {
@@ -571,7 +527,7 @@ impl PartitionService {
             }
         }
 
-        let mut dist = rx.recv().await?;
+        let mut dist = rx.recv().await.unwrap();
         for _ in 0..len - 1 {
             dist = merge_search_document_response(dist, rx.recv().await.unwrap());
         }

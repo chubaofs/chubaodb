@@ -6,7 +6,7 @@ use crate::util::{
     error::*,
 };
 use crate::*;
-use log::error;
+use tracing::log::error;
 use std::sync::Arc;
 
 #[derive(Clone)]

@@ -13,7 +13,10 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-log = "0.4.11"
+tracing = "0.1.22"
+tracing-subscriber = "0.2.15"
+tracing-futures = "0.2.4"
+tracing-opentelemetry = "0.9.0"
 log4rs = "0.13.0"
 clap = "2.33.3"
 chrono = "0.4.15"
@@ -21,12 +24,12 @@ backtrace = "0.3"
 toml = "0.5.6"
 actix-web = "2.0.0"
 async-trait = "0.1.40"
-async-graphql = "1.17.21"
-async-graphql-actix-web = "1.17.18"
+async-graphql = "2.8.2"
+async-graphql-actix-web = "2.8.2"
 actix-rt = "1.1.1"
 http = "0.2.1"
 tonic = { version = "0.3.1", features = ["tls"] }
-async-std = { version = "1.6.3", features = ["default", "unstable", "tokio02"]}
+tokio = { version = "1.5.0", features = ["full"] }
 prost = "0.6.1"
 serde = { version = "1.0.115" }
 serde_derive = "1.0.115"
@@ -38,7 +41,6 @@ uuid = { version = "0.8", features = ["v4"] }
 itertools = "0.9.0"
 rocksdb = { version = "0.15.0", features = ["lz4"] }
 tantivy = "0.13.0"
-raft4rs = "0.1.4"
 rand = "0.7.3"
 roaring = "0.6.0"
 num_enum = "0.5.1"

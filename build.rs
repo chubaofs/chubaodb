@@ -12,6 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use std::path::Path;
+
 fn main() {
     let proto = "proto/pserverpb.proto";
 
@@ -23,6 +24,7 @@ fn main() {
         .expect("proto file should reside in a directory");
 
     tonic_build::configure()
+        .out_dir("proto/src")
         .type_attribute(".", "#[derive(serde_derive::Serialize)]")
         .compile(&[proto_path], &[proto_dir])
         .unwrap();

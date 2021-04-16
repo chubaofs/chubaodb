@@ -32,7 +32,7 @@ use crate::util::{
 };
 use crate::*;
 use chrono::prelude::*;
-use log::{debug, error, info, warn};
+use tracing::log::{debug, error, info, warn};
 use roaring::RoaringBitmap;
 use std::convert::TryInto;
 use std::{
@@ -154,7 +154,7 @@ impl Tantivy {
             .try_into()
             .unwrap();
 
-        let (tx, rx) = channel::<Event>();
+        let (tx, mut rx) = channel::<Event>();
 
         db.arc_count.fetch_add(1, SeqCst);
         let tantivy = Arc::new(Tantivy {
@@ -529,7 +529,7 @@ impl Tantivy {
                                     Code::FieldTypeErr,
                                     "not support this type :{:?}",
                                     field,
-                                )
+                                );
                             }
                         };
                         doc.add(FieldValue::new(field_index, v));
@@ -575,7 +575,7 @@ impl Tantivy {
                                 Code::FieldTypeErr,
                                 "not support value by this type :{:?}",
                                 field,
-                            )
+                            );
                         }
                     }
                 }

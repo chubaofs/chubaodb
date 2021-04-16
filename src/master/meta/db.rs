@@ -17,7 +17,7 @@ use crate::util::entity::{entity_key, MakeKey};
 use crate::util::error::*;
 use crate::util::time::*;
 use crate::*;
-use log::error;
+use tracing::log::error;
 use rocksdb::{Direction, IteratorMode, WriteBatch, WriteOptions, DB};
 use serde::{de::DeserializeOwned, Serialize};
 

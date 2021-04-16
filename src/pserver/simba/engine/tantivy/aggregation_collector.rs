@@ -92,7 +92,7 @@ impl SegmentAggregationCollector {
         if index >= self.groups.len() {
             let path = path.join(self.linker.as_str());
             if let Err(e) = self.agg.write().unwrap().map(path.as_str(), values) {
-                log::error!("{:?}", e);
+                tracing::log::error!("{:?}", e);
             };
             return;
         };

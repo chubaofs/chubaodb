@@ -10,7 +10,7 @@ use crate::util::{
 };
 use crate::*;
 use faiss4rs::{Config, Index};
-use log::{debug, error, info, warn};
+use tracing::log::{debug, error, info, warn};
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use std::ops::Deref;

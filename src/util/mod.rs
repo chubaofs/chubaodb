@@ -29,8 +29,8 @@ macro_rules! sleep {
 
 //println stack trace
 pub fn stack_trace() {
-    use log::Level::Debug;
-    use log::{debug, log_enabled};
+    use tracing::log::Level::Debug;
+    use tracing::log::{debug, log_enabled};
 
     if !log_enabled!(Debug) {
         return;

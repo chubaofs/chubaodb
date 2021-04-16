@@ -18,7 +18,7 @@ use crate::pserverpb::{
 };
 use crate::util::entity::*;
 use crate::util::{config, error::*};
-use log::{error, info};
+use tracing::log::{error, info};
 use std::error::Error;
 use std::sync::{mpsc::Sender, Arc};
 use std::time;

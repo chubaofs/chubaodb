@@ -13,7 +13,7 @@
 // permissions and limitations under the License.
 use crate::util::error::*;
 use crate::*;
-use log::{debug, info};
+use tracing::log::{debug, info};
 use serde_derive::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;

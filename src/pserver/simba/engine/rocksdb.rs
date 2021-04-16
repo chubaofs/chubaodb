@@ -17,7 +17,7 @@ use crate::util::{
     error::*,
 };
 use crate::*;
-use log::{error, info};
+use tracing::log::{error, info};
 use rocksdb::{ColumnFamily, Direction, FlushOptions, IteratorMode, WriteBatch, WriteOptions, DB};
 use std::ops::Deref;
 use std::path::Path;

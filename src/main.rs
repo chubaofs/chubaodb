@@ -13,7 +13,7 @@
 // permissions and limitations under the License.
 use chubaodb::{master, pserver, router, util};
 use clap::{App, Arg, SubCommand};
-use log::{error, info};
+use tracing::log::{error, info};
 use std::sync::{mpsc::channel, Arc};
 use std::thread;
 
@@ -100,7 +100,7 @@ fn main() {
 
     let arc_conf = Arc::new(conf);
 
-    let (tx, rx) = channel::<String>();
+    let (tx,mut rx) = channel::<String>();
 
     match subcommand {
         "master" => {
@@ -114,7 +114,8 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let _ = async_std::task::block_on(pserver::server::start(tx_clone, arc));
+                let rt  = tokio::runtime::Runtime::new().unwrap();
+                let _ = rt.block_on(pserver::server::start(tx_clone, arc));
             });
         }
         "router" => {
@@ -140,7 +141,8 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let _ = async_std::task::block_on(pserver::server::start(tx_clone, arc));
+                let rt  = tokio::runtime::Runtime::new().unwrap();
+                let _ = rt.block_on(pserver::server::start(tx_clone, arc));
             });
         }
         _ => panic!("Subcommand {} is unknow", subcommand),

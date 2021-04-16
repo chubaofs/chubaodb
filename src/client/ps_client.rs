@@ -18,8 +18,9 @@ use crate::pserverpb::rpc_client::RpcClient;
 use crate::pserverpb::*;
 use crate::util::{coding, config, entity::*, error::*};
 use crate::*;
-use async_std::{sync::channel, task};
-use log::{error, info, warn};
+use tokio::task;
+use tokio::sync::mpsc::channel;
+use tracing::log::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tonic::transport::{Channel, Endpoint};
@@ -117,7 +118,7 @@ impl PsClient {
                 write_type: wt,
             },
         )
-        .await
+            .await
     }
 
     pub async fn get(
@@ -163,7 +164,7 @@ impl PsClient {
                 sort_key: sort_key.to_string(),
             },
         )
-        .await
+            .await
     }
 
     pub async fn multiple_search(
@@ -171,19 +172,19 @@ impl PsClient {
         collection_name: Vec<String>,
         query: QueryRequest,
     ) -> ASResult<SearchDocumentResponse> {
-        let (tx, rx) = channel(10);
+        let (tx, mut rx) = channel(10);
         for name in collection_name {
             let tx = tx.clone();
             let cli = self.clone();
             let query = query.clone();
-            task::spawn(async move { tx.send(cli.search(name.as_str(), query).await).await });
+            tokio::spawn(async move { tx.send(cli.search(name.as_str(), query).await).await });
         }
 
         drop(tx);
 
         let mut dist = rx.recv().await.unwrap()?;
 
-        while let Ok(src) = rx.recv().await {
+        while let Some(src) = rx.recv().await {
             let src = src?;
             dist = merge_search_document_response(dist, src);
         }
@@ -197,7 +198,7 @@ impl PsClient {
         query: QueryRequest,
     ) -> ASResult<SearchDocumentResponse> {
         'outer: for i in 0..RETRY {
-            let (tx, rx) = channel(10);
+            let (tx, mut rx) = channel(10);
 
             match self.select_collection(collection_name).await {
                 Ok(mpl) => {
@@ -205,7 +206,7 @@ impl PsClient {
                         let mut query = query.clone();
                         query.cpids = mp.collection_partition_ids.clone();
                         let tx = tx.clone();
-                        task::spawn(async move {
+                        tokio::spawn(async move {
                             match mp.search(query).await {
                                 Ok(resp) => {
                                     tx.send(resp).await;
@@ -232,20 +233,20 @@ impl PsClient {
 
             if Code::from_i32(dist.code) != Code::Success
                 && self.check_response_cache(
+                i,
+                collection_name,
+                err!(dist.code, msg_for_resp(&dist.info)),
+            )
+            {
+                continue 'outer;
+            }
+            while let Some(src) = rx.recv().await {
+                if Code::from_i32(src.code) != Code::Success
+                    && self.check_response_cache(
                     i,
                     collection_name,
                     err!(dist.code, msg_for_resp(&dist.info)),
                 )
-            {
-                continue 'outer;
-            }
-            while let Ok(src) = rx.recv().await {
-                if Code::from_i32(src.code) != Code::Success
-                    && self.check_response_cache(
-                        i,
-                        collection_name,
-                        err!(dist.code, msg_for_resp(&dist.info)),
-                    )
                 {
                     continue 'outer;
                 }
@@ -263,7 +264,7 @@ impl PsClient {
         query: QueryRequest,
     ) -> ASResult<AggregationResponse> {
         'outer: for i in 0..RETRY {
-            let (tx, rx) = channel::<AggregationResponse>(10);
+            let (tx, mut rx) = channel::<AggregationResponse>(10);
 
             let mut result_size: i32 = 0;
 
@@ -274,7 +275,7 @@ impl PsClient {
                         query.cpids = mp.collection_partition_ids.clone();
                         let tx = tx.clone();
                         result_size += 1;
-                        task::spawn(async move {
+                        tokio::spawn(async move {
                             match mp.agg(query).await {
                                 Ok(resp) => tx.send(resp).await,
                                 Err(e) => tx.send(e.into()).await,
@@ -306,20 +307,20 @@ impl PsClient {
 
             if Code::from_i32(dist.code) != Code::Success
                 && self.check_response_cache(
+                i,
+                collection_name,
+                err!(dist.code, msg_for_resp(&dist.info)),
+            )
+            {
+                continue 'outer;
+            }
+            while let Some(src) = rx.recv().await {
+                if Code::from_i32(src.code) != Code::Success
+                    && self.check_response_cache(
                     i,
                     collection_name,
                     err!(dist.code, msg_for_resp(&dist.info)),
                 )
-            {
-                continue 'outer;
-            }
-            while let Ok(src) = rx.recv().await {
-                if Code::from_i32(src.code) != Code::Success
-                    && self.check_response_cache(
-                        i,
-                        collection_name,
-                        err!(dist.code, msg_for_resp(&dist.info)),
-                    )
                 {
                     continue 'outer;
                 }
@@ -334,55 +335,55 @@ impl PsClient {
     }
 
     pub async fn count(&self, collection_name: &str) -> ASResult<CountDocumentResponse> {
-        'outer: for i in 0..RETRY {
-            let (tx, rx) = channel::<CountDocumentResponse>(10);
-
-            match self.select_collection(collection_name).await {
-                Ok(mpl) => {
-                    for mp in mpl {
-                        let tx = tx.clone();
-                        task::spawn(async move {
-                            match mp.count().await {
-                                Ok(resp) => tx.send(resp).await,
-                                Err(e) => {
-                                    if let Err(e) = tx.try_send(e.into()) {
-                                        error!("send result has err:{:?}", e); //TODO: if errr
-                                    };
-                                }
-                            };
-                        });
-                    }
-                }
-                Err(e) => {
-                    if self.check_err_cache(i, collection_name, &e) {
-                        continue;
-                    } else {
-                        return Err(e);
-                    }
-                }
-            };
-
-            drop(tx);
-
-            let mut dist = rx.recv().await.unwrap();
-
-            if Code::from_i32(dist.code) != Code::Success
-                && self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
-            {
-                continue 'outer;
-            }
-
-            while let Ok(src) = rx.recv().await {
-                if Code::from_i32(src.code) != Code::Success
-                    && self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
-                {
-                    continue 'outer;
-                }
-                dist = merge_count_document_response(dist, src);
-            }
-
-            return Ok(dist);
-        }
+        // 'outer: for i in 0..RETRY {
+        // 	let (tx, rx) = channel::<CountDocumentResponse>(10);
+        //
+        // 	match self.select_collection(collection_name).await {
+        // 		Ok(mpl) => {
+        // 			for mp in mpl {
+        // 				let tx = tx.clone();
+        // 				task::spawn(async move {
+        // 					match mp.count().await {
+        // 						Ok(resp) => tx.send(resp).await,
+        // 						Err(e) => {
+        // 							if let Err(e) = tx.try_send(e.into()) {
+        // 								error!("send result has err:{:?}", e); //TODO: if errr
+        // 							};
+        // 						}
+        // 					};
+        // 				});
+        // 			}
+        // 		}
+        // 		Err(e) => {
+        // 			if self.check_err_cache(i, collection_name, &e) {
+        // 				continue;
+        // 			} else {
+        // 				return Err(e);
+        // 			}
+        // 		}
+        // 	};
+        //
+        // 	drop(tx);
+        //
+        // 	let mut dist = rx.recv().await.unwrap();
+        //
+        // 	if Code::from_i32(dist.code) != Code::Success
+        // 		&& self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
+        // 	{
+        // 		continue 'outer;
+        // 	}
+        //
+        // 	while let Ok(src) = rx.recv().await {
+        // 		if Code::from_i32(src.code) != Code::Success
+        // 			&& self.check_response_cache(i, collection_name, err!(dist.code, dist.message))
+        // 		{
+        // 			continue 'outer;
+        // 		}
+        // 		dist = merge_count_document_response(dist, src);
+        // 	}
+        //
+        // 	return Ok(dist);
+        // }
         panic!("out of range");
     }
 
