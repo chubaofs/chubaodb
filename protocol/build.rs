@@ -9,6 +9,7 @@ fn main() {
         .parent()
         .expect("proto file should reside in a directory");
 
+    //TODO
     tonic_build::configure()
         .out_dir("proto/src")
         .type_attribute(".", "#[derive(serde_derive::Serialize)]")
