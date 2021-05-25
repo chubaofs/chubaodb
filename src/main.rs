@@ -13,9 +13,10 @@
 // permissions and limitations under the License.
 use chubaodb::{master, pserver, router, util};
 use clap::{App, Arg, SubCommand};
-use tracing::log::{error, info};
+use core::panic;
 use std::sync::{mpsc::channel, Arc};
 use std::thread;
+use tracing::log::{error, info};
 
 fn main() {
     let app = App::new("chubaodb")
@@ -100,7 +101,7 @@ fn main() {
 
     let arc_conf = Arc::new(conf);
 
-    let (tx,mut rx) = channel::<String>();
+    let (tx, rx) = channel::<String>();
 
     match subcommand {
         "master" => {
@@ -114,7 +115,7 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let rt  = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
                 let _ = rt.block_on(pserver::server::start(tx_clone, arc));
             });
         }
@@ -141,7 +142,7 @@ fn main() {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
-                let rt  = tokio::runtime::Runtime::new().unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
                 let _ = rt.block_on(pserver::server::start(tx_clone, arc));
             });
         }

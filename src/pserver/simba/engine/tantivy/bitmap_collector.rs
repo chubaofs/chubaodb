@@ -20,7 +20,11 @@ impl Collector for Bitmap {
     ) -> tantivy::Result<SegmentBitMapCollector> {
         Ok(SegmentBitMapCollector {
             bit_map: RoaringBitmap::new(),
-            fast_field: sr.fast_fields().bytes(Field::from_field_id(ID_INDEX)),
+            fast_field: sr
+                .fast_fields()
+                .bytes(Field::from_field_id(ID_INDEX))
+                .map(|v| Some(v))
+                .unwrap(),
         })
     }
 

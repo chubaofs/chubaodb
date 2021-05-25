@@ -19,5 +19,5 @@ pub mod router;
 pub mod util;
 
 pub mod pserverpb {
-    tonic::include_proto!("pserverpb");
+    include!("../proto/src/pserverpb.rs");
 }

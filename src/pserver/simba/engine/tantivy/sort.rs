@@ -124,15 +124,7 @@ impl CustomScorer<FieldScore> for FieldSorts {
         let mut ffr = FieldFastReader::with_capacity(self.0.len());
 
         for fs in self.0.iter() {
-            let reader = segment_reader
-                .fast_fields()
-                .bytes(fs.field)
-                .ok_or_else(|| {
-                    tantivy::TantivyError::SchemaError(format!(
-                        "Field requested ({:?}) is not a i64/u64 fast field.",
-                        fs.field
-                    ))
-                })?;
+            let reader = segment_reader.fast_fields().bytes(fs.field)?;
 
             ffr.push(FieldReader {
                 reader,

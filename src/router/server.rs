@@ -1,30 +1,17 @@
 use std::sync::{mpsc::Sender, Arc};
 
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
-use tracing::log::{error, info};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tracing::log::{error, info};
 
-use crate::*;
-// Copyright 2020 The Chubao Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-// implied. See the License for the specific language governing
-// permissions and limitations under the License.
 use crate::pserverpb::*;
 use crate::router::service::RouterService;
 use crate::util::{config, error::*};
+use crate::*;
 
-#[actix_rt::main]
+#[actix_web::main]
 pub async fn start(tx: Sender<String>, conf: Arc<config::Config>) -> std::io::Result<()> {
     info!(
         "router is listening on http://0.0.0.0:{}",

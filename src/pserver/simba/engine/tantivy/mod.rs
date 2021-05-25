@@ -32,7 +32,6 @@ use crate::util::{
 };
 use crate::*;
 use chrono::prelude::*;
-use tracing::log::{debug, error, info, warn};
 use roaring::RoaringBitmap;
 use std::convert::TryInto;
 use std::{
@@ -54,6 +53,7 @@ use tantivy::{
     schema::{Field, FieldType, FieldValue, IndexRecordOption, Schema, Value},
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Term,
 };
+use tracing::log::{debug, error, info, warn};
 
 const INDEXER_MEMORY_SIZE: usize = 1_000_000_000;
 const INDEXER_THREAD: usize = 1;
@@ -93,7 +93,7 @@ impl Tantivy {
 
         let mut schema_builder = Schema::builder();
         schema_builder.add_i64_field(ID, schema::IntOptions::default().set_indexed());
-        schema_builder.add_bytes_field(ID_BYTES); //if you want put default filed mut modify validate method - 2 in code
+        schema_builder.add_bytes_field(ID_BYTES, schema::BytesOptions::default().set_fast()); //if you want put default filed mut modify validate method - 2 in code
 
         for i in base.collection.index_field.iter() {
             let field = &base.collection.fields[*i as usize];
@@ -127,7 +127,10 @@ impl Tantivy {
             }
 
             if field.value() {
-                schema_builder.add_bytes_field(value_name.as_str());
+                schema_builder.add_bytes_field(
+                    value_name.as_str(),
+                    schema::BytesOptions::default().set_fast(),
+                );
             }
         }
 
