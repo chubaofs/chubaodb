@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use crate::pserverpb::{rpc_client::RpcClient, *};
 use crate::util::error::*;
 use crate::*;
+use alaya_protocol::pserver::{rpc_client::RpcClient, *};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Request;
 #[derive(Default)]

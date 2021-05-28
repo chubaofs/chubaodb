@@ -13,17 +13,16 @@
 // permissions and limitations under the License.
 use crate::client::meta_client::MetaClient;
 use crate::client::partition_client::*;
-use crate::pserver::simba::aggregation;
-use crate::pserverpb::rpc_client::RpcClient;
-use crate::pserverpb::*;
+use crate::data::simba::aggregation;
 use crate::util::{coding, config, entity::*, error::*};
 use crate::*;
-use tokio::task;
-use tokio::sync::mpsc::channel;
-use tracing::log::{error, info, warn};
+use alaya_protocol::pserver::{rpc_client::RpcClient, *};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
+use tokio::sync::mpsc::channel;
+use tokio::task;
 use tonic::transport::{Channel, Endpoint};
+use tracing::log::{error, info, warn};
 
 const RETRY: usize = 5;
 
@@ -118,7 +117,7 @@ impl PsClient {
                 write_type: wt,
             },
         )
-            .await
+        .await
     }
 
     pub async fn get(
@@ -164,7 +163,7 @@ impl PsClient {
                 sort_key: sort_key.to_string(),
             },
         )
-            .await
+        .await
     }
 
     pub async fn multiple_search(
@@ -233,20 +232,20 @@ impl PsClient {
 
             if Code::from_i32(dist.code) != Code::Success
                 && self.check_response_cache(
-                i,
-                collection_name,
-                err!(dist.code, msg_for_resp(&dist.info)),
-            )
+                    i,
+                    collection_name,
+                    err!(dist.code, msg_for_resp(&dist.info)),
+                )
             {
                 continue 'outer;
             }
             while let Some(src) = rx.recv().await {
                 if Code::from_i32(src.code) != Code::Success
                     && self.check_response_cache(
-                    i,
-                    collection_name,
-                    err!(dist.code, msg_for_resp(&dist.info)),
-                )
+                        i,
+                        collection_name,
+                        err!(dist.code, msg_for_resp(&dist.info)),
+                    )
                 {
                     continue 'outer;
                 }
@@ -307,20 +306,20 @@ impl PsClient {
 
             if Code::from_i32(dist.code) != Code::Success
                 && self.check_response_cache(
-                i,
-                collection_name,
-                err!(dist.code, msg_for_resp(&dist.info)),
-            )
+                    i,
+                    collection_name,
+                    err!(dist.code, msg_for_resp(&dist.info)),
+                )
             {
                 continue 'outer;
             }
             while let Some(src) = rx.recv().await {
                 if Code::from_i32(src.code) != Code::Success
                     && self.check_response_cache(
-                    i,
-                    collection_name,
-                    err!(dist.code, msg_for_resp(&dist.info)),
-                )
+                        i,
+                        collection_name,
+                        err!(dist.code, msg_for_resp(&dist.info)),
+                    )
                 {
                     continue 'outer;
                 }

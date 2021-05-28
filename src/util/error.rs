@@ -1,9 +1,9 @@
-use crate::pserverpb::*;
-use tracing::log::error;
+use alaya_protocol::pserver::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde_json::json;
 use std::convert::TryFrom;
 use std::error::Error;
+use tracing::log::error;
 
 pub type ASResult<T> = std::result::Result<T, ASError>;
 
@@ -224,7 +224,6 @@ impl std::fmt::Display for ASError {
     }
 }
 
-
 impl From<serde_json::Error> for ASError {
     fn from(e: serde_json::Error) -> Self {
         err!(Code::SerdeErr, e.to_string())
@@ -285,7 +284,6 @@ impl From<tonic::Status> for ASError {
     }
 }
 
-
 pub fn cast<E: std::fmt::Display>(e: E) -> ASError {
     ASError::Error(Code::InternalErr, e.to_string())
 }
@@ -304,7 +302,6 @@ impl Into<SearchDocumentResponse> for ASError {
         }
     }
 }
-
 
 impl Into<AggregationResponse> for ASError {
     fn into(self) -> AggregationResponse {

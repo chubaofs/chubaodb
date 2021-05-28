@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+import "raft.proto";
+
+package meta_raft;
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+    raft.RaftMetrics metrics = 1;
+}
+
+service MetaRaft {
+  rpc Vote(raft.VoteRequest) returns (raft.VoteResponse) {}
+
+  rpc AppendEntries(raft.AppendEntriesRequest) returns (raft.AppendEntriesResponse) {}
+
+  rpc Metrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+}

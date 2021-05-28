@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-
-pub mod client;
-pub mod data;
-pub mod meta;
-pub mod router;
-pub mod util;
+pub mod cmd;
+pub mod graphql;
+mod meta_raft_service;
+pub mod server;
+pub mod service;
+pub mod store;

@@ -18,6 +18,7 @@ pub mod entity;
 pub mod error;
 pub mod http_client;
 pub mod net;
+pub mod storage;
 pub mod time;
 
 #[macro_export]

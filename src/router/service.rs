@@ -12,8 +12,8 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::client::ps_client::PsClient;
-use crate::pserverpb::*;
 use crate::util::{config::Config, error::*};
+use alaya_protocol::pserver::*;
 use std::sync::Arc;
 
 pub struct RouterService {
