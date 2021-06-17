@@ -13,7 +13,6 @@
 // permissions and limitations under the License.
 
 pub mod client;
-pub mod data;
 pub mod meta;
 pub mod router;
 pub mod util;

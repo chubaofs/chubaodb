@@ -13,7 +13,7 @@
 // permissions and limitations under the License.
 pub mod cmd;
 pub mod graphql;
-mod meta_raft_service;
+// mod meta_raft_service;
 pub mod server;
 pub mod service;
 pub mod store;

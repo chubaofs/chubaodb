@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use chubaodb::{data, meta, router, util};
+use chubaodb::{meta, router, util};
 use clap::{App, Arg, SubCommand};
 use core::panic;
 use std::sync::{mpsc::channel, Arc};
@@ -112,39 +112,39 @@ fn main() {
             });
         }
         "ps" => {
-            let arc = arc_conf.clone();
-            let tx_clone = tx.clone();
-            thread::spawn(|| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let _ = rt.block_on(data::server::start(tx_clone, arc));
-            });
+            // let arc = arc_conf.clone();
+            // let tx_clone = tx.clone();
+            // thread::spawn(|| {
+            //     let rt = tokio::runtime::Runtime::new().unwrap();
+            //     let _ = rt.block_on(data::server::start(tx_clone, arc));
+            // });
         }
         "router" => {
-            let arc = arc_conf.clone();
-            let tx_clone = tx.clone();
-            thread::spawn(|| {
-                let _ = router::server::start(tx_clone, arc).unwrap();
-            });
+            // let arc = arc_conf.clone();
+            // let tx_clone = tx.clone();
+            // thread::spawn(|| {
+            //     let _ = router::server::start(tx_clone, arc).unwrap();
+            // });
         }
         "all" => {
-            let arc = arc_conf.clone();
-            let tx_clone = tx.clone();
-            thread::spawn(|| {
-                let _ = meta::server::start(tx_clone, arc);
-            });
+            // let arc = arc_conf.clone();
+            // let tx_clone = tx.clone();
+            // thread::spawn(|| {
+            //     let _ = meta::server::start(tx_clone, arc);
+            // });
 
-            let arc = arc_conf.clone();
-            let tx_clone = tx.clone();
-            thread::spawn(|| {
-                let _ = router::server::start(tx_clone, arc).unwrap();
-            });
+            // let arc = arc_conf.clone();
+            // let tx_clone = tx.clone();
+            // thread::spawn(|| {
+            //     let _ = router::server::start(tx_clone, arc).unwrap();
+            // });
 
-            let arc = arc_conf.clone();
-            let tx_clone = tx.clone();
-            thread::spawn(|| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let _ = rt.block_on(data::server::start(tx_clone, arc));
-            });
+            // let arc = arc_conf.clone();
+            // let tx_clone = tx.clone();
+            // thread::spawn(|| {
+            //     let rt = tokio::runtime::Runtime::new().unwrap();
+            //     let _ = rt.block_on(data::server::start(tx_clone, arc));
+            // });
         }
         _ => panic!("Subcommand {} is unknow", subcommand),
     }

@@ -310,7 +310,7 @@ impl Query {
         // ));
     }
 
-    async fn version(&self, _: &Context<'_>) -> JsonValue {
+    async fn version(&self) -> JsonValue {
         Json(serde_json::json!({
             "chubaodb":"master runing",
             "version":config::VERSION,

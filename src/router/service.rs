@@ -11,20 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use crate::client::ps_client::PsClient;
 use crate::util::{config::Config, error::*};
 use alaya_protocol::pserver::*;
 use std::sync::Arc;
 
-pub struct RouterService {
-    ps_client: Arc<PsClient>,
-}
+pub struct RouterService {}
 
 impl RouterService {
     pub async fn new(conf: Arc<Config>) -> ASResult<RouterService> {
-        Ok(RouterService {
-            ps_client: Arc::new(PsClient::new(conf)),
-        })
+        Ok(RouterService {})
     }
 
     pub async fn write(
@@ -36,9 +31,7 @@ impl RouterService {
         source: Vec<u8>,
         wt: i32,
     ) -> ASResult<GeneralResponse> {
-        self.ps_client
-            .write(collection_name, id, sort_key, version, source, wt)
-            .await
+        panic!();
     }
 
     pub async fn get(
@@ -47,7 +40,7 @@ impl RouterService {
         id: String,
         sort_key: String,
     ) -> ASResult<DocumentResponse> {
-        self.ps_client.get(collection_name, id, sort_key).await
+        panic!();
     }
 
     pub async fn search(
@@ -59,21 +52,7 @@ impl RouterService {
         size: u32,
         sort: Vec<Order>,
     ) -> ASResult<SearchDocumentResponse> {
-        self.ps_client
-            .multiple_search(
-                collection_names,
-                QueryRequest {
-                    cpids: vec![],
-                    query: query,
-                    def_fields: def_fields,
-                    vector_query: vector_query,
-                    size: size,
-                    sort: sort,
-                    fun: Default::default(),
-                    group: Default::default(),
-                },
-            )
-            .await
+        panic!();
     }
 
     pub async fn agg(
@@ -87,24 +66,10 @@ impl RouterService {
         fun: String,
         sort: Vec<Order>,
     ) -> ASResult<AggregationResponse> {
-        self.ps_client
-            .agg(
-                collection_names[0].as_str(),
-                QueryRequest {
-                    cpids: vec![],
-                    query,
-                    def_fields,
-                    vector_query,
-                    size,
-                    group,
-                    fun,
-                    sort,
-                },
-            )
-            .await
+        panic!();
     }
 
     pub async fn count(&self, collection_name: String) -> ASResult<CountDocumentResponse> {
-        self.ps_client.count(collection_name.as_str()).await
+        panic!();
     }
 }

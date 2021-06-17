@@ -3,8 +3,6 @@ use std::io::Write;
 use byteorder::{WriteBytesExt, BE};
 use smallvec::SmallVec;
 
-use crate::common::bytes_prefix;
-
 const LAST_APPLIED_LOG: u8 = 1;
 const HARD_STATE: u8 = 2;
 const ENTRY: u8 = 3;
@@ -78,4 +76,17 @@ pub fn scope_end(scope: &[u8]) -> SmallVec<[u8; 32]> {
     let mut key: SmallVec<[u8; 32]> = Default::default();
     key.write_all(scope).unwrap();
     bytes_prefix(&key).1
+}
+
+#[inline]
+pub fn bytes_prefix(prefix: &[u8]) -> (SmallVec<[u8; 32]>, SmallVec<[u8; 32]>) {
+    let mut limit = SmallVec::default();
+    for i in (0..prefix.len()).rev() {
+        let c = prefix[i];
+        if c < 0xff {
+            limit.write_all(&prefix[..i]).unwrap();
+            limit.write_u8(c + 1).unwrap();
+        }
+    }
+    (SmallVec::from_slice(prefix), limit)
 }

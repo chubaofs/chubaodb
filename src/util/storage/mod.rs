@@ -2,20 +2,20 @@ mod key;
 
 use std::sync::Arc;
 
+use alaya_protocol::raft::Entry as RaftEntry;
 use anyhow::Result;
 use prost::Message;
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
-use xraft::{HardState, InitialState, Storage as RaftStorage};
-
+use xraft::{Entry, HardState, InitialState, LogIndex, Storage, StorageResult};
 pub const CF_LOG: &str = "log";
 pub const CF_DATA: &str = "data";
 
-pub struct Storage {
+pub struct RaftStorage {
     db: Arc<DB>,
     scope: Vec<u8>,
 }
 
-impl Storage {
+impl RaftStorage {
     pub fn new(db: Arc<DB>, scope: Option<&[u8]>) -> Self {
         Self {
             db,
@@ -136,7 +136,7 @@ impl Storage {
         }
     }
 
-    fn last_entry(&self) -> Result<Option<Entry>> {
+    fn last_entry(&self) -> Result<Option<RaftEntry>> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         match self
             .db
@@ -150,7 +150,7 @@ impl Storage {
                 if !key::is_entry(&self.scope, &key) {
                     Ok(None)
                 } else {
-                    Ok(Some(Entry::decode(&*value)?))
+                    Ok(Some(RaftEntry::decode(&*value)?))
                 }
             }
             None => Ok(None),
@@ -158,45 +158,42 @@ impl Storage {
     }
 }
 
-impl RaftStorage for Storage {
-    fn get_initial_state(&self) -> xraft::StorageResult<InitialState<N>> {
-        todo!()
+impl Storage<(), RaftEntry> for RaftStorage {
+    fn get_initial_state(&self) -> StorageResult<InitialState<()>> {
+        panic!()
     }
 
-    fn save_hard_state(&self, hard_state: HardState) -> xraft::StorageResult<()> {
-        todo!()
+    fn save_hard_state(&self, hard_state: HardState) -> StorageResult<()> {
+        panic!()
     }
 
-    fn last_applied(&self) -> xraft::StorageResult<u64> {
-        todo!()
+    fn last_applied(&self) -> StorageResult<u64> {
+        panic!()
     }
 
     fn get_log_entries(
         &self,
-        start: xraft::LogIndex,
-        end: xraft::LogIndex,
-    ) -> xraft::StorageResult<Vec<xraft::Entry<N, D>>> {
-        todo!()
+        start: LogIndex,
+        end: LogIndex,
+    ) -> StorageResult<Vec<Entry<(), RaftEntry>>> {
+        panic!()
     }
 
-    fn delete_logs_from(
-        &self,
-        start: xraft::LogIndex,
-        end: Option<xraft::LogIndex>,
-    ) -> xraft::StorageResult<()> {
-        todo!()
+    fn delete_logs_from(&self, start: LogIndex, end: Option<LogIndex>) -> StorageResult<()> {
+        panic!()
     }
 
-    fn append_entries_to_log(&self, entries: &[xraft::Entry<N, D>]) -> xraft::StorageResult<()> {
-        todo!()
+    fn append_entries_to_log(&self, entries: &[Entry<(), RaftEntry>]) -> StorageResult<()> {
+        panic!()
     }
 
     fn apply_entries_to_state_machine(
         &self,
-        entries: &[xraft::Entry<N, D>],
-    ) -> xraft::StorageResult<()> {
-        todo!()
+        entries: &[Entry<(), RaftEntry>],
+    ) -> StorageResult<()> {
+        panic!()
     }
+
     // fn get_initial_state(&self) -> Result<InitialState> {
     //     let hard_state = self.hard_state()?;
     //     let (last_log_index, last_log_term) = match self.last_entry()? {
