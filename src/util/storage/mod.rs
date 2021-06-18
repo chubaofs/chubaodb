@@ -2,7 +2,7 @@ mod key;
 
 use std::sync::Arc;
 
-use alaya_protocol::raft::Entry as RaftEntry;
+use alaya_protocol::raft::{Entry as RaftEntry, EntryType};
 use anyhow::Result;
 use prost::Message;
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
@@ -13,6 +13,16 @@ pub const CF_DATA: &str = "data";
 pub struct RaftStorage {
     db: Arc<DB>,
     scope: Vec<u8>,
+    inner: RwLock<Inner>,
+}
+
+#[derive(Default)]
+struct Inner {
+    hard_state: Option<HardState>,
+    membership: Option<MemberShipConfig<()>>,
+    logs: BTreeMap<LogIndex, Entry<(), Action>>,
+    last_applied: LogIndex,
+    kvs: HashMap<String, i32>,
 }
 
 impl RaftStorage {
@@ -160,15 +170,34 @@ impl RaftStorage {
 
 impl Storage<(), RaftEntry> for RaftStorage {
     fn get_initial_state(&self) -> StorageResult<InitialState<()>> {
-        panic!()
+        let inner = self.inner.read().unwrap() ;
+        let hard_state = self.hard_state()?;
+        let (last_log_index, last_log_term) = match self.last_entry()? {
+            Some(entry) => (entry.index, entry.term),
+            None => (0, 0),
+        };
+        Ok(InitialState {
+            last_log_index,
+            last_log_term,
+            hard_state,
+        })
     }
 
-    fn save_hard_state(&self, hard_state: HardState) -> StorageResult<()> {
-        panic!()
+    fn save_hard_state(&self, hard_state: HardState) -> Result<()> {
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        Ok(self.db.put_cf(
+            cf_log,
+            key::hard_state(&self.scope),
+            bincode::serialize(&hard_state)?,
+        )?)
     }
 
-    fn last_applied(&self) -> StorageResult<u64> {
-        panic!()
+    fn last_applied(&self) -> Result<u64> {
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        match self.db.get_cf(cf_log, key::last_applied_log(&self.scope))? {
+            Some(value) => Ok(bincode::deserialize(&value)?),
+            None => Ok(0),
+        }
     }
 
     fn get_log_entries(
@@ -176,128 +205,82 @@ impl Storage<(), RaftEntry> for RaftStorage {
         start: LogIndex,
         end: LogIndex,
     ) -> StorageResult<Vec<Entry<(), RaftEntry>>> {
-        panic!()
+        let mut entries = Vec::new();
+        let end = key::entry(&self.scope, end);
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        let mut opts = ReadOptions::default();
+        opts.set_iterate_upper_bound(&*end);
+        for (_, value) in self.db.iterator_cf_opt(
+            cf_log,
+            opts,
+            IteratorMode::From(&key::entry(&self.scope, start), Direction::Forward),
+        ) {
+            entries.push(RaftEntry::decode(&*value)?);
+        }
+        Ok(entries)
     }
 
-    fn delete_logs_from(&self, start: LogIndex, end: Option<LogIndex>) -> StorageResult<()> {
-        panic!()
+    fn delete_logs_from(&self, start: u64, stop: Option<u64>) -> Result<()> {
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        self.db.delete_range_cf(
+            cf_log,
+            key::entry(&self.scope, start),
+            match stop {
+                Some(stop) => key::entry(&self.scope, stop),
+                None => key::entry_end(&self.scope),
+            },
+        )?;
+        Ok(())
     }
 
     fn append_entries_to_log(&self, entries: &[Entry<(), RaftEntry>]) -> StorageResult<()> {
-        panic!()
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        let mut wb = WriteBatch::default();
+        let mut data = Vec::new();
+        for entry in entries {
+            data.clear();
+            entry.encode(&mut data)?;
+            wb.put_cf(cf_log, key::entry(&self.scope, entry.index), &data);
+        }
+        self.db.write(wb)?;
+        Ok(())
     }
 
     fn apply_entries_to_state_machine(
         &self,
         entries: &[Entry<(), RaftEntry>],
     ) -> StorageResult<()> {
-        panic!()
+        let cf_log = self.db.cf_handle(CF_LOG).unwrap();
+        let cf_data = self.db.cf_handle(CF_DATA).unwrap();
+
+        let last_index = entries.last().unwrap().index;
+        let mut wb = WriteBatch::default();
+
+        for entry in entries {
+            if entry.r#type() != EntryType::Normal {
+                continue;
+            }
+
+            let actions = WriteActions::decode(&*entry.data).unwrap();
+            for action in actions.actions {
+                let ty = action.r#type();
+                let kv = action.kv.unwrap();
+                match ty {
+                    write_action::Type::Put => {
+                        wb.put_cf(cf_data, key::data(&self.scope, &kv.key), &kv.value);
+                    }
+                    write_action::Type::Delete => {
+                        wb.delete_cf(cf_data, key::data(&self.scope, &kv.key));
+                    }
+                }
+            }
+        }
+        wb.put_cf(
+            cf_log,
+            key::last_applied_log(&self.scope),
+            bincode::serialize(&last_index)?,
+        );
+        self.db.write(wb)?;
+        Ok(())
     }
-
-    // fn get_initial_state(&self) -> Result<InitialState> {
-    //     let hard_state = self.hard_state()?;
-    //     let (last_log_index, last_log_term) = match self.last_entry()? {
-    //         Some(entry) => (entry.index, entry.term),
-    //         None => (0, 0),
-    //     };
-    //     Ok(InitialState {
-    //         last_log_index,
-    //         last_log_term,
-    //         hard_state,
-    //     })
-    // }
-
-    // fn save_hard_state(&self, hard_state: HardState) -> Result<()> {
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     Ok(self.db.put_cf(
-    //         cf_log,
-    //         key::hard_state(&self.scope),
-    //         bincode::serialize(&hard_state)?,
-    //     )?)
-    // }
-
-    // fn last_applied(&self) -> Result<u64> {
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     match self.db.get_cf(cf_log, key::last_applied_log(&self.scope))? {
-    //         Some(value) => Ok(bincode::deserialize(&value)?),
-    //         None => Ok(0),
-    //     }
-    // }
-
-    // fn get_log_entries(&self, start: u64, end: u64) -> Result<Vec<Entry>> {
-    //     let mut entries = Vec::new();
-    //     let end = key::entry(&self.scope, end);
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     let mut opts = ReadOptions::default();
-    //     opts.set_iterate_upper_bound(&*end);
-    //     for (_, value) in self.db.iterator_cf_opt(
-    //         cf_log,
-    //         opts,
-    //         IteratorMode::From(&key::entry(&self.scope, start), Direction::Forward),
-    //     ) {
-    //         entries.push(Entry::decode(&*value)?);
-    //     }
-    //     Ok(entries)
-    // }
-
-    // fn delete_logs_from(&self, start: u64, stop: Option<u64>) -> Result<()> {
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     self.db.delete_range_cf(
-    //         cf_log,
-    //         key::entry(&self.scope, start),
-    //         match stop {
-    //             Some(stop) => key::entry(&self.scope, stop),
-    //             None => key::entry_end(&self.scope),
-    //         },
-    //     )?;
-    //     Ok(())
-    // }
-
-    // fn append_entries_to_log(&self, entries: &[Entry]) -> Result<()> {
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     let mut wb = WriteBatch::default();
-    //     let mut data = Vec::new();
-    //     for entry in entries {
-    //         data.clear();
-    //         entry.encode(&mut data)?;
-    //         wb.put_cf(cf_log, key::entry(&self.scope, entry.index), &data);
-    //     }
-    //     self.db.write(wb)?;
-    //     Ok(())
-    // }
-
-    // fn apply_entries_to_state_machine(&self, entries: &[Entry]) -> Result<()> {
-    //     let cf_log = self.db.cf_handle(CF_LOG).unwrap();
-    //     let cf_data = self.db.cf_handle(CF_DATA).unwrap();
-
-    //     let last_index = entries.last().unwrap().index;
-    //     let mut wb = WriteBatch::default();
-
-    //     for entry in entries {
-    //         if entry.r#type() != EntryType::Normal {
-    //             continue;
-    //         }
-
-    //         let actions = WriteActions::decode(&*entry.data).unwrap();
-    //         for action in actions.actions {
-    //             let ty = action.r#type();
-    //             let kv = action.kv.unwrap();
-    //             match ty {
-    //                 write_action::Type::Put => {
-    //                     wb.put_cf(cf_data, key::data(&self.scope, &kv.key), &kv.value);
-    //                 }
-    //                 write_action::Type::Delete => {
-    //                     wb.delete_cf(cf_data, key::data(&self.scope, &kv.key));
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     wb.put_cf(
-    //         cf_log,
-    //         key::last_applied_log(&self.scope),
-    //         bincode::serialize(&last_index)?,
-    //     );
-    //     self.db.write(wb)?;
-    //     Ok(())
-    // }
 }
