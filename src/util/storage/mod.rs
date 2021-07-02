@@ -2,11 +2,14 @@ mod key;
 
 use std::sync::Arc;
 
-use alaya_protocol::raft::{Entry as RaftEntry, EntryType};
+use alaya_protocol::raft::{Entry as RaftEntry, EntryType, WriteActions, write_action};
 use anyhow::Result;
 use prost::Message;
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
-use xraft::{Entry, HardState, InitialState, LogIndex, Storage, StorageResult};
+use xraft::{Entry, EntryDetail,HardState, InitialState, LogIndex, Storage, StorageResult,MemberShipConfig};
+use std::sync::RwLock;
+use std::collections::{HashMap};
+
 pub const CF_LOG: &str = "log";
 pub const CF_DATA: &str = "data";
 
@@ -20,7 +23,6 @@ pub struct RaftStorage {
 struct Inner {
     hard_state: Option<HardState>,
     membership: Option<MemberShipConfig<()>>,
-    logs: BTreeMap<LogIndex, Entry<(), Action>>,
     last_applied: LogIndex,
     kvs: HashMap<String, i32>,
 }
@@ -30,6 +32,7 @@ impl RaftStorage {
         Self {
             db,
             scope: scope.map(|data| data.to_vec()).unwrap_or_default(),
+            inner:RwLock::new(Inner::default()),
         }
     }
 
@@ -180,6 +183,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
             last_log_index,
             last_log_term,
             hard_state,
+            membership: inner.membership.clone(),
         })
     }
 
@@ -215,7 +219,12 @@ impl Storage<(), RaftEntry> for RaftStorage {
             opts,
             IteratorMode::From(&key::entry(&self.scope, start), Direction::Forward),
         ) {
-            entries.push(RaftEntry::decode(&*value)?);
+            let e = RaftEntry::decode(&*value)? ;
+            // entries.push(Entry{
+            //     term: e.term,
+            //     index: e.index,
+            //     detail: EntryDetail::Normal(e),
+            // }); TODO ............ANSJ
         }
         Ok(entries)
     }
