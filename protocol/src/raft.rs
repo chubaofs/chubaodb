@@ -1,4 +1,6 @@
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct RaftMetrics {
     #[prost(uint64, tag = "1")]
     pub id: u64,
@@ -15,14 +17,18 @@ pub struct RaftMetrics {
     #[prost(uint64, tag = "7")]
     pub current_leader: u64,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Kv {
     #[prost(bytes = "vec", tag = "1")]
     pub key: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes = "vec", tag = "2")]
     pub value: ::prost::alloc::vec::Vec<u8>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct WriteAction {
     #[prost(enumeration = "write_action::Type", tag = "1")]
     pub r#type: i32,
@@ -33,6 +39,7 @@ pub struct WriteAction {
 pub mod write_action {
     #[derive(
         serde_derive::Serialize,
+        serde_derive::Deserialize,
         Clone,
         Copy,
         Debug,
@@ -49,12 +56,16 @@ pub mod write_action {
         Delete = 1,
     }
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct WriteActions {
     #[prost(message, repeated, tag = "1")]
     pub actions: ::prost::alloc::vec::Vec<WriteAction>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Entry {
     #[prost(uint64, tag = "1")]
     pub term: u64,
@@ -65,7 +76,9 @@ pub struct Entry {
     #[prost(bytes = "vec", tag = "4")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct VoteRequest {
     #[prost(uint64, tag = "1")]
     pub term: u64,
@@ -76,14 +89,18 @@ pub struct VoteRequest {
     #[prost(uint64, tag = "4")]
     pub last_log_term: u64,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct VoteResponse {
     #[prost(uint64, tag = "1")]
     pub term: u64,
     #[prost(bool, tag = "2")]
     pub vote_granted: bool,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AppendEntriesRequest {
     #[prost(uint64, tag = "1")]
     pub term: u64,
@@ -98,7 +115,9 @@ pub struct AppendEntriesRequest {
     #[prost(message, repeated, tag = "6")]
     pub entries: ::prost::alloc::vec::Vec<Entry>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AppendEntriesResponse {
     #[prost(uint64, tag = "1")]
     pub term: u64,
@@ -107,6 +126,7 @@ pub struct AppendEntriesResponse {
 }
 #[derive(
     serde_derive::Serialize,
+    serde_derive::Deserialize,
     Clone,
     Copy,
     Debug,
@@ -125,6 +145,7 @@ pub enum Role {
 }
 #[derive(
     serde_derive::Serialize,
+    serde_derive::Deserialize,
     Clone,
     Copy,
     Debug,

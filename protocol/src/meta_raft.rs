@@ -1,6 +1,10 @@
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct GetMetricsRequest {}
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct GetMetricsResponse {
     #[prost(message, optional, tag = "1")]
     pub metrics: ::core::option::Option<super::raft::RaftMetrics>,

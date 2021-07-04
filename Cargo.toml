@@ -42,7 +42,7 @@ git-version = "0.3.4"
 uuid = { version = "0.8", features = ["v4"] }
 itertools = "0.10.0"
 rocksdb = { version = "0.16.0", features = ["lz4"] }
-tantivy = "0.14.0"
+tantivy = "0.15.3"
 rand = "0.8.3"
 roaring = "0.7.0"
 num_enum = "0.5.1"

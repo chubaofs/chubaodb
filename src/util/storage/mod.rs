@@ -2,13 +2,14 @@ mod key;
 
 use std::sync::Arc;
 
-use alaya_protocol::raft::{Entry as RaftEntry, EntryType, WriteActions, write_action};
+use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
 use anyhow::Result;
 use prost::Message;
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
-use xraft::{Entry, EntryDetail,HardState, InitialState, LogIndex, Storage, StorageResult,MemberShipConfig};
 use std::sync::RwLock;
-use std::collections::{HashMap};
+use xraft::{
+    Entry, EntryDetail, HardState, InitialState, LogIndex, MemberShipConfig, Storage, StorageResult,
+};
 
 pub const CF_LOG: &str = "log";
 pub const CF_DATA: &str = "data";
@@ -21,10 +22,7 @@ pub struct RaftStorage {
 
 #[derive(Default)]
 struct Inner {
-    hard_state: Option<HardState>,
     membership: Option<MemberShipConfig<()>>,
-    last_applied: LogIndex,
-    kvs: HashMap<String, i32>,
 }
 
 impl RaftStorage {
@@ -32,7 +30,7 @@ impl RaftStorage {
         Self {
             db,
             scope: scope.map(|data| data.to_vec()).unwrap_or_default(),
-            inner:RwLock::new(Inner::default()),
+            inner: RwLock::new(Inner::default()),
         }
     }
 
@@ -173,7 +171,7 @@ impl RaftStorage {
 
 impl Storage<(), RaftEntry> for RaftStorage {
     fn get_initial_state(&self) -> StorageResult<InitialState<()>> {
-        let inner = self.inner.read().unwrap() ;
+        let inner = self.inner.read().unwrap();
         let hard_state = self.hard_state()?;
         let (last_log_index, last_log_term) = match self.last_entry()? {
             Some(entry) => (entry.index, entry.term),
@@ -219,12 +217,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
             opts,
             IteratorMode::From(&key::entry(&self.scope, start), Direction::Forward),
         ) {
-            let e = RaftEntry::decode(&*value)? ;
-            // entries.push(Entry{
-            //     term: e.term,
-            //     index: e.index,
-            //     detail: EntryDetail::Normal(e),
-            // }); TODO ............ANSJ
+            entries.push(bincode::deserialize(&*value).unwrap());
         }
         Ok(entries)
     }
@@ -245,11 +238,12 @@ impl Storage<(), RaftEntry> for RaftStorage {
     fn append_entries_to_log(&self, entries: &[Entry<(), RaftEntry>]) -> StorageResult<()> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         let mut wb = WriteBatch::default();
-        let mut data = Vec::new();
         for entry in entries {
-            data.clear();
-            entry.encode(&mut data)?;
-            wb.put_cf(cf_log, key::entry(&self.scope, entry.index), &data);
+            wb.put_cf(
+                cf_log,
+                key::entry(&self.scope, entry.index),
+                bincode::serialize(entry).unwrap(),
+            );
         }
         self.db.write(wb)?;
         Ok(())
@@ -266,20 +260,18 @@ impl Storage<(), RaftEntry> for RaftStorage {
         let mut wb = WriteBatch::default();
 
         for entry in entries {
-            if entry.r#type() != EntryType::Normal {
-                continue;
-            }
-
-            let actions = WriteActions::decode(&*entry.data).unwrap();
-            for action in actions.actions {
-                let ty = action.r#type();
-                let kv = action.kv.unwrap();
-                match ty {
-                    write_action::Type::Put => {
-                        wb.put_cf(cf_data, key::data(&self.scope, &kv.key), &kv.value);
-                    }
-                    write_action::Type::Delete => {
-                        wb.delete_cf(cf_data, key::data(&self.scope, &kv.key));
+            if let EntryDetail::Normal(e) = &entry.detail {
+                let actions = WriteActions::decode(&*e.data).unwrap();
+                for action in actions.actions {
+                    let ty = action.r#type();
+                    let kv = action.kv.unwrap();
+                    match ty {
+                        write_action::Type::Put => {
+                            wb.put_cf(cf_data, key::data(&self.scope, &kv.key), &kv.value);
+                        }
+                        write_action::Type::Delete => {
+                            wb.delete_cf(cf_data, key::data(&self.scope, &kv.key));
+                        }
                     }
                 }
             }

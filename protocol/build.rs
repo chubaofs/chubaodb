@@ -1,7 +1,10 @@
 fn main() {
     tonic_build::configure()
         .out_dir("src")
-        .type_attribute(".", "#[derive(serde_derive::Serialize)]")
+        .type_attribute(
+            ".",
+            "#[derive(serde_derive::Serialize,serde_derive::Deserialize)]",
+        )
         .compile(
             &[
                 "proto/raft.proto",

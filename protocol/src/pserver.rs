@@ -1,9 +1,13 @@
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct CountDocumentRequest {
     #[prost(uint64, repeated, tag = "1")]
     pub cpids: ::prost::alloc::vec::Vec<u64>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct CountDocumentResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -18,26 +22,34 @@ pub struct CountDocumentResponse {
     #[prost(string, tag = "7")]
     pub message: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct VectorCount {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(uint64, tag = "2")]
     pub count: u64,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Order {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub order: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggCount {
     #[prost(uint64, tag = "1")]
     pub count: u64,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggStats {
     #[prost(uint64, tag = "1")]
     pub count: u64,
@@ -52,7 +64,9 @@ pub struct AggStats {
     #[prost(uint64, tag = "6")]
     pub missing: u64,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggHits {
     #[prost(uint64, tag = "1")]
     pub size: u64,
@@ -61,14 +75,18 @@ pub struct AggHits {
     #[prost(message, repeated, tag = "3")]
     pub hits: ::prost::alloc::vec::Vec<Hit>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggValue {
     #[prost(oneof = "agg_value::AggValue", tags = "1, 2, 3")]
     pub agg_value: ::core::option::Option<agg_value::AggValue>,
 }
 /// Nested message and enum types in `AggValue`.
 pub mod agg_value {
-    #[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Oneof)]
+    #[derive(
+        serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Oneof,
+    )]
     pub enum AggValue {
         #[prost(message, tag = "1")]
         Count(super::AggCount),
@@ -78,14 +96,18 @@ pub mod agg_value {
         Hits(super::AggHits),
     }
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggValues {
     #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
     pub values: ::prost::alloc::vec::Vec<AggValue>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct AggregationResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -98,7 +120,9 @@ pub struct AggregationResponse {
     #[prost(message, optional, tag = "5")]
     pub info: ::core::option::Option<SearchInfo>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct QueryRequest {
     #[prost(uint64, repeated, tag = "1")]
     pub cpids: ::prost::alloc::vec::Vec<u64>,
@@ -117,14 +141,18 @@ pub struct QueryRequest {
     #[prost(string, tag = "8")]
     pub fun: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct VectorQuery {
     #[prost(string, tag = "1")]
     pub field: ::prost::alloc::string::String,
     #[prost(float, repeated, tag = "2")]
     pub vector: ::prost::alloc::vec::Vec<f32>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct SearchDocumentResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -135,7 +163,9 @@ pub struct SearchDocumentResponse {
     #[prost(message, optional, tag = "4")]
     pub info: ::core::option::Option<SearchInfo>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct SearchInfo {
     #[prost(int32, tag = "1")]
     pub success: i32,
@@ -144,7 +174,9 @@ pub struct SearchInfo {
     #[prost(string, tag = "3")]
     pub message: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct GetDocumentRequest {
     #[prost(uint32, tag = "1")]
     pub collection_id: u32,
@@ -155,7 +187,9 @@ pub struct GetDocumentRequest {
     #[prost(string, tag = "4")]
     pub sort_key: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct DocumentResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -164,7 +198,9 @@ pub struct DocumentResponse {
     #[prost(bytes = "vec", tag = "3")]
     pub doc: ::prost::alloc::vec::Vec<u8>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Hit {
     #[prost(string, tag = "1")]
     pub collection_name: ::prost::alloc::string::String,
@@ -175,7 +211,9 @@ pub struct Hit {
     #[prost(bytes = "vec", repeated, tag = "4")]
     pub sort: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Document {
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
@@ -194,14 +232,18 @@ pub struct Document {
     #[prost(bytes = "vec", repeated, tag = "8")]
     pub scalars: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct Vector {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(float, repeated, tag = "2")]
     pub vector: ::prost::alloc::vec::Vec<f32>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct WriteDocumentRequest {
     #[prost(uint32, tag = "1")]
     pub collection_id: u32,
@@ -212,14 +254,18 @@ pub struct WriteDocumentRequest {
     #[prost(enumeration = "WriteType", tag = "4")]
     pub write_type: i32,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct ReplicaInfo {
     #[prost(uint32, tag = "1")]
     pub node: u32,
     #[prost(uint32, tag = "2")]
     pub replica_type: u32,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct PartitionRequest {
     #[prost(uint32, tag = "1")]
     pub partition_id: u32,
@@ -233,7 +279,9 @@ pub struct PartitionRequest {
     #[prost(message, repeated, tag = "5")]
     pub replicas: ::prost::alloc::vec::Vec<ReplicaInfo>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct StatsResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -242,26 +290,34 @@ pub struct StatsResponse {
     #[prost(uint32, tag = "3")]
     pub partition_id: u32,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct GeneralRequest {
     #[prost(uint32, tag = "2")]
     pub collection_id: u32,
     #[prost(uint32, tag = "1")]
     pub partition_id: u32,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct GeneralResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct CommandRequest {
     #[prost(bytes = "vec", tag = "2")]
     pub body: ::prost::alloc::vec::Vec<u8>,
 }
-#[derive(serde_derive::Serialize, Clone, PartialEq, ::prost::Message)]
+#[derive(
+    serde_derive::Serialize, serde_derive::Deserialize, Clone, PartialEq, ::prost::Message,
+)]
 pub struct CommandResponse {
     #[prost(int32, tag = "1")]
     pub code: i32,
@@ -272,6 +328,7 @@ pub struct CommandResponse {
 }
 #[derive(
     serde_derive::Serialize,
+    serde_derive::Deserialize,
     Clone,
     Copy,
     Debug,
