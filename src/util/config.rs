@@ -1,10 +1,10 @@
 // Copyright 2020 The Chubao Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// you may not use this fil port: (), log_max_num: (), heartbeat_interval: (), election_timeout_min: (), election_timeout_max: (), max_payload_entries: (), to_voter_threshold: ()  port: (), log_max_num: (), heartbeat_interval: (), election_timeout_min: (), election_timeout_max: (), max_payload_entries: (), to_voter_threshold: () e except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/lice port: (), heartbeat_interval: (), election_timeout_min: (), election_timeout_max: (), max_payload_entries: (), to_voter_threshold: () nses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,6 @@
 // permissions and limitations under the License.
 use crate::util::net::MyIp;
 use git_version::git_version;
-use tracing::log::{info, LevelFilter};
 use log4rs::{
     append::{
         console::{ConsoleAppender, Target},
@@ -28,15 +27,16 @@ use log4rs::{
     encode::pattern::PatternEncoder,
     filter::threshold::ThresholdFilter,
 };
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::prelude::*;
 use toml;
+use tracing::log::{info, LevelFilter};
 
 pub const VERSION: &str = clap::crate_version!();
 pub const GIT_VERSION: &str = git_version!();
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Config {
     pub global: Global,
     pub router: Router,
@@ -44,7 +44,7 @@ pub struct Config {
     pub masters: Vec<Master>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Global {
     pub name: String,
     #[serde(default = "empty_str")]
@@ -66,12 +66,12 @@ fn default_log_file_count() -> usize {
     100
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Router {
     pub http_port: u16,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct PS {
     // id value not need set in config, It will be assigned by the master
     pub id: Option<u64>,
@@ -82,21 +82,20 @@ pub struct PS {
     pub raft: RaftConf,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct RaftConf {
-    pub heartbeat_port: u16,
-    pub replicate_port: u16,
-    // how size of num for memory
+    pub port: u16,
     pub log_max_num: usize,
     // how size of num for memory
-    pub log_min_num: usize,
-    // how size of num for memory
-    pub log_file_size_mb: u64,
-    //Three  without a heartbeat , follower to begin consecutive elections
-    pub heartbeate_ms: u64,
+    //raft config
+    pub heartbeat_interval: u64,
+    pub election_timeout_min: u64,
+    pub election_timeout_max: u64,
+    pub max_payload_entries: usize,
+    pub to_voter_threshold: usize,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Master {
     pub node_id: u64,
     pub ip: String,
@@ -237,12 +236,13 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 rpc_port: 9090,
                 flush_sleep_sec: Some(3),
                 raft: RaftConf {
-                    heartbeat_port: 12130,
-                    replicate_port: 12131,
+                    port: 12130,
                     log_max_num: 20000,
-                    log_min_num: 10000,
-                    log_file_size_mb: 32,
-                    heartbeate_ms: 500,
+                    heartbeat_interval: 150,
+                    election_timeout_min: 300,
+                    election_timeout_max: 600,
+                    max_payload_entries: 1000,
+                    to_voter_threshold: 100,
                 },
             },
             router: Router { http_port: 8080 },
@@ -253,12 +253,13 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 is_self: true,
                 data: String::from("data/"),
                 raft: RaftConf {
-                    heartbeat_port: 22130,
-                    replicate_port: 22131,
+                    port: 12130,
                     log_max_num: 20000,
-                    log_min_num: 10000,
-                    log_file_size_mb: 32,
-                    heartbeate_ms: 500,
+                    heartbeat_interval: 150,
+                    election_timeout_min: 300,
+                    election_timeout_max: 600,
+                    max_payload_entries: 1000,
+                    to_voter_threshold: 100,
                 },
             }],
         };

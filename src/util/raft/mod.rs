@@ -1,36 +1,36 @@
 mod key;
-
-use std::sync::Arc;
+mod network;
 
 use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
 use anyhow::Result;
 use prost::Message;
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
+use serde::de::DeserializeOwned;
+use serde::Deserializer;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::RwLock;
 use xraft::{
-    Entry, EntryDetail, HardState, InitialState, LogIndex, MemberShipConfig, Storage, StorageResult,
+    Entry, EntryDetail, HardState, InitialState, LogIndex, MemberShipConfig, NodeId, Storage,
+    StorageResult,
 };
 
 pub const CF_LOG: &str = "log";
 pub const CF_DATA: &str = "data";
 
-pub struct RaftStorage {
+pub struct RaftStorage<N> {
     db: Arc<DB>,
     scope: Vec<u8>,
-    inner: RwLock<Inner>,
+    membership: RwLock<Option<MemberShipConfig<N>>>,
 }
 
-#[derive(Default)]
-struct Inner {
-    membership: Option<MemberShipConfig<()>>,
-}
-
-impl RaftStorage {
+impl<N> RaftStorage<N> {
     pub fn new(db: Arc<DB>, scope: Option<&[u8]>) -> Self {
         Self {
             db,
             scope: scope.map(|data| data.to_vec()).unwrap_or_default(),
-            inner: RwLock::new(Inner::default()),
+            membership: RwLock::new(Some(MemberShipConfig::default())),
         }
     }
 
@@ -169,9 +169,11 @@ impl RaftStorage {
     }
 }
 
-impl Storage<(), RaftEntry> for RaftStorage {
-    fn get_initial_state(&self) -> StorageResult<InitialState<()>> {
-        let inner = self.inner.read().unwrap();
+impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEntry>
+    for RaftStorage<N>
+{
+    fn get_initial_state(&self) -> StorageResult<InitialState<N>> {
+        let membership = self.membership.read().unwrap();
         let hard_state = self.hard_state()?;
         let (last_log_index, last_log_term) = match self.last_entry()? {
             Some(entry) => (entry.index, entry.term),
@@ -181,7 +183,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
             last_log_index,
             last_log_term,
             hard_state,
-            membership: inner.membership.clone(),
+            membership: membership.clone(),
         })
     }
 
@@ -206,7 +208,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
         &self,
         start: LogIndex,
         end: LogIndex,
-    ) -> StorageResult<Vec<Entry<(), RaftEntry>>> {
+    ) -> StorageResult<Vec<Entry<N, RaftEntry>>> {
         let mut entries = Vec::new();
         let end = key::entry(&self.scope, end);
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
@@ -235,7 +237,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
         Ok(())
     }
 
-    fn append_entries_to_log(&self, entries: &[Entry<(), RaftEntry>]) -> StorageResult<()> {
+    fn append_entries_to_log(&self, entries: &[Entry<N, RaftEntry>]) -> StorageResult<()> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         let mut wb = WriteBatch::default();
         for entry in entries {
@@ -249,10 +251,7 @@ impl Storage<(), RaftEntry> for RaftStorage {
         Ok(())
     }
 
-    fn apply_entries_to_state_machine(
-        &self,
-        entries: &[Entry<(), RaftEntry>],
-    ) -> StorageResult<()> {
+    fn apply_entries_to_state_machine(&self, entries: &[Entry<N, RaftEntry>]) -> StorageResult<()> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         let cf_data = self.db.cf_handle(CF_DATA).unwrap();
 

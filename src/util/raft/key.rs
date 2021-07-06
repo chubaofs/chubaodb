@@ -1,11 +1,17 @@
-use std::io::Write;
-
 use byteorder::{WriteBytesExt, BE};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use smallvec::SmallVec;
+use std::io::Write;
 
 const LAST_APPLIED_LOG: u8 = 1;
 const HARD_STATE: u8 = 2;
 const ENTRY: u8 = 3;
+
+#[derive(Debug, Deserialize, Clone, Serialize, PartialEq, PartialOrd)]
+pub struct Member {
+    pub id: u64,
+    pub addr: String,
+}
 
 #[inline]
 pub fn last_applied_log(scope: &[u8]) -> SmallVec<[u8; 32]> {

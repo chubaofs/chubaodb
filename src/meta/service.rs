@@ -11,29 +11,61 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use crate::meta::cmd::*;
-use crate::meta::store::HARepository;
 use crate::sleep;
 use crate::util::time::*;
-use crate::util::{coding, config::Config, entity::*, error::*};
+use crate::util::{
+    coding,
+    config::{Config, Master},
+    entity::*,
+    error::*,
+    raft::*,
+};
 use crate::*;
 use alaya_protocol::pserver::*;
+use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
 use rand::seq::SliceRandom;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::log::{debug, error, info, warn};
+use xraft::Raft;
 
 pub struct MasterService {
-    pub meta_service: HARepository,
+    raft: xraft::Raft<Master, RaftEntry>,
     partition_lock: RwLock<usize>,
     collection_lock: Mutex<usize>,
 }
 
 impl MasterService {
     pub async fn new(conf: Arc<Config>) -> ASResult<MasterService> {
+        // let members = conf
+        //     .masters
+        //     .iter()
+        //     .map(|m| (m.node_id, Arc::new(m.clone())))
+        //     .collect();
+
+        let master = conf.self_master().unwrap();
+
+        let mut option = rocksdb::Options::default();
+        option.create_if_missing(true);
+        let db = rocksdb::DB::open(&option, master.data.as_str())?;
+
+        let raft = Raft::new(
+            format!("master_{}", master.node_id),
+            master.node_id,
+            Arc::new(xraft::Config {
+                heartbeat_interval: master.raft.heartbeat_interval,
+                election_timeout_min: master.raft.election_timeout_min,
+                election_timeout_max: master.raft.election_timeout_max,
+                max_payload_entries: master.raft.max_payload_entries,
+                to_voter_threshold: master.raft.to_voter_threshold,
+            }),
+            Arc::new(RaftStorage::new(Arc::new(db), None)),
+            network,
+        )?;
+
         Ok(MasterService {
-            meta_service: HARepository::new(conf).await?,
+            raft,
             partition_lock: RwLock::new(0),
             collection_lock: Mutex::new(0),
         })

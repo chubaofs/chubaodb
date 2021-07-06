@@ -284,6 +284,12 @@ impl From<tonic::Status> for ASError {
     }
 }
 
+impl From<xraft::RaftError> for ASError {
+    fn from(e: xraft::RaftError) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
 pub fn cast<E: std::fmt::Display>(e: E) -> ASError {
     ASError::Error(Code::InternalErr, e.to_string())
 }
