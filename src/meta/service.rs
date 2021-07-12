@@ -18,7 +18,7 @@ use crate::util::{
     config::{Config, Master},
     entity::*,
     error::*,
-    raft::*,
+    raft::{network::RaftNetwork, *},
 };
 use crate::*;
 use alaya_protocol::pserver::*;
@@ -28,10 +28,11 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::log::{debug, error, info, warn};
+use xraft::NodeId;
 use xraft::Raft;
 
 pub struct MasterService {
-    raft: xraft::Raft<Master, RaftEntry>,
+    raft: xraft::Raft<NodeId, WriteActions>,
     partition_lock: RwLock<usize>,
     collection_lock: Mutex<usize>,
 }
@@ -61,7 +62,7 @@ impl MasterService {
                 to_voter_threshold: master.raft.to_voter_threshold,
             }),
             Arc::new(RaftStorage::new(Arc::new(db), None)),
-            network,
+            Arc::new(RaftNetwork::default()),
         )?;
 
         Ok(MasterService {

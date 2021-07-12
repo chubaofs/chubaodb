@@ -1,5 +1,5 @@
-mod key;
-mod network;
+pub mod key;
+pub mod network;
 
 use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
 use anyhow::Result;
@@ -19,13 +19,13 @@ use xraft::{
 pub const CF_LOG: &str = "log";
 pub const CF_DATA: &str = "data";
 
-pub struct RaftStorage<N> {
+pub struct RaftStorage {
     db: Arc<DB>,
     scope: Vec<u8>,
-    membership: RwLock<Option<MemberShipConfig<N>>>,
+    membership: RwLock<Option<MemberShipConfig<NodeId>>>,
 }
 
-impl<N> RaftStorage<N> {
+impl RaftStorage {
     pub fn new(db: Arc<DB>, scope: Option<&[u8]>) -> Self {
         Self {
             db,
@@ -169,10 +169,8 @@ impl<N> RaftStorage<N> {
     }
 }
 
-impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEntry>
-    for RaftStorage<N>
-{
-    fn get_initial_state(&self) -> StorageResult<InitialState<N>> {
+impl Storage<NodeId, WriteActions> for RaftStorage {
+    fn get_initial_state(&self) -> StorageResult<InitialState<NodeId>> {
         let membership = self.membership.read().unwrap();
         let hard_state = self.hard_state()?;
         let (last_log_index, last_log_term) = match self.last_entry()? {
@@ -208,7 +206,7 @@ impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEnt
         &self,
         start: LogIndex,
         end: LogIndex,
-    ) -> StorageResult<Vec<Entry<N, RaftEntry>>> {
+    ) -> StorageResult<Vec<Entry<NodeId, WriteActions>>> {
         let mut entries = Vec::new();
         let end = key::entry(&self.scope, end);
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
@@ -237,7 +235,7 @@ impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEnt
         Ok(())
     }
 
-    fn append_entries_to_log(&self, entries: &[Entry<N, RaftEntry>]) -> StorageResult<()> {
+    fn append_entries_to_log(&self, entries: &[Entry<NodeId, WriteActions>]) -> StorageResult<()> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         let mut wb = WriteBatch::default();
         for entry in entries {
@@ -251,7 +249,10 @@ impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEnt
         Ok(())
     }
 
-    fn apply_entries_to_state_machine(&self, entries: &[Entry<N, RaftEntry>]) -> StorageResult<()> {
+    fn apply_entries_to_state_machine(
+        &self,
+        entries: &[Entry<NodeId, WriteActions>],
+    ) -> StorageResult<()> {
         let cf_log = self.db.cf_handle(CF_LOG).unwrap();
         let cf_data = self.db.cf_handle(CF_DATA).unwrap();
 
@@ -259,11 +260,10 @@ impl<N: Send + Sync + 'static + DeserializeOwned + Serialize> Storage<N, RaftEnt
         let mut wb = WriteBatch::default();
 
         for entry in entries {
-            if let EntryDetail::Normal(e) = &entry.detail {
-                let actions = WriteActions::decode(&*e.data).unwrap();
-                for action in actions.actions {
+            if let EntryDetail::Normal(actions) = &entry.detail {
+                for action in actions.actions.iter() {
                     let ty = action.r#type();
-                    let kv = action.kv.unwrap();
+                    let kv = action.kv.as_ref().unwrap();
                     match ty {
                         write_action::Type::Put => {
                             wb.put_cf(cf_data, key::data(&self.scope, &kv.key), &kv.value);
