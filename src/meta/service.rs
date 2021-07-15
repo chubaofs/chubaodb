@@ -1,4 +1,4 @@
-// Copyright 2020 The Chubao Authors.
+// Copyright 2020 The Chubao Aut r#type: (), kv: ()  r#type: (), kv: ()  r#type: (), kv: () hors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 use crate::sleep;
+use crate::util::raft::network::Member;
 use crate::util::time::*;
 use crate::util::{
     coding,
@@ -22,8 +23,12 @@ use crate::util::{
 };
 use crate::*;
 use alaya_protocol::pserver::*;
+use alaya_protocol::raft::Kv;
+use alaya_protocol::raft::WriteAction;
 use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
+use core::panicking::panic;
 use rand::seq::SliceRandom;
+use std::fmt::format;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -39,19 +44,13 @@ pub struct MasterService {
 
 impl MasterService {
     pub async fn new(conf: Arc<Config>) -> ASResult<MasterService> {
-        // let members = conf
-        //     .masters
-        //     .iter()
-        //     .map(|m| (m.node_id, Arc::new(m.clone())))
-        //     .collect();
-
         let master = conf.self_master().unwrap();
 
         let mut option = rocksdb::Options::default();
         option.create_if_missing(true);
         let db = rocksdb::DB::open(&option, master.data.as_str())?;
 
-        let raft = Raft::new(
+        let raft = Arc::new(Raft::new(
             format!("master_{}", master.node_id),
             master.node_id,
             Arc::new(xraft::Config {
@@ -63,7 +62,11 @@ impl MasterService {
             }),
             Arc::new(RaftStorage::new(Arc::new(db), None)),
             Arc::new(RaftNetwork::default()),
-        )?;
+        )?);
+
+        conf.masters.iter().for_each(|m| {
+            raft.add_non_voter(m.node_id, m.node_id);
+        });
 
         Ok(MasterService {
             raft,
@@ -73,7 +76,19 @@ impl MasterService {
     }
 
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
-        panic!();
+        self.raft
+            .client_write(WriteActions {
+                actions: vec![WriteAction {
+                    r#type: write_action::Type::Delete,
+                    kv: Some(Kv {
+                        key: collection_name.to_owned().into_bytes(),
+                        value: vec![],
+                    }),
+                }],
+            })
+            .await?;
+
+        panic!()
     }
 
     pub async fn create_collection(&self, mut collection: Collection) -> ASResult<Collection> {
