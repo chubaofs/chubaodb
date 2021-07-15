@@ -5,10 +5,10 @@ authors = ["Ansj <ansj-sun@163.com>"]
 edition = "2018"
 
 [dependencies]
-tonic = { version = "0.4.2" }
+tonic = { version = "0.5.0" }
 serde = { version = "1.0", features = ["derive"] }
-prost = "0.7"
+prost = "0.8.0"
 serde_derive = "1.0.115"
 
 [build-dependencies]
-tonic-build = { version = "0.4.2" }
+tonic-build = { version = "0.5.1" }

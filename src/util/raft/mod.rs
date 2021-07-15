@@ -161,7 +161,7 @@ impl RaftStorage {
                 if !key::is_entry(&self.scope, &key) {
                     Ok(None)
                 } else {
-                    Ok(Some(RaftEntry::decode(&*value)?))
+                    Ok(Some(bincode::deserialize(&*value)?))
                 }
             }
             None => Ok(None),

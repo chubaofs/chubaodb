@@ -26,7 +26,6 @@ use alaya_protocol::pserver::*;
 use alaya_protocol::raft::Kv;
 use alaya_protocol::raft::WriteAction;
 use alaya_protocol::raft::{write_action, Entry as RaftEntry, WriteActions};
-use core::panicking::panic;
 use rand::seq::SliceRandom;
 use std::fmt::format;
 use std::sync::atomic::AtomicU64;
@@ -35,9 +34,11 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::log::{debug, error, info, warn};
 use xraft::NodeId;
 use xraft::Raft;
+use crate::meta::collection_key;
 
 pub struct MasterService {
-    raft: xraft::Raft<NodeId, WriteActions>,
+    storage: Arc<RaftStorage>,
+    raft: Arc<xraft::Raft<NodeId, WriteActions>>,
     partition_lock: RwLock<usize>,
     collection_lock: Mutex<usize>,
 }
@@ -45,10 +46,9 @@ pub struct MasterService {
 impl MasterService {
     pub async fn new(conf: Arc<Config>) -> ASResult<MasterService> {
         let master = conf.self_master().unwrap();
-
         let mut option = rocksdb::Options::default();
         option.create_if_missing(true);
-        let db = rocksdb::DB::open(&option, master.data.as_str())?;
+        let storage = Arc::new(RaftStorage::new(Arc::new(rocksdb::DB::open(&option, master.data.as_str())?), None));
 
         let raft = Arc::new(Raft::new(
             format!("master_{}", master.node_id),
@@ -60,7 +60,7 @@ impl MasterService {
                 max_payload_entries: master.raft.max_payload_entries,
                 to_voter_threshold: master.raft.to_voter_threshold,
             }),
-            Arc::new(RaftStorage::new(Arc::new(db), None)),
+            storage.clone(),
             Arc::new(RaftNetwork::default()),
         )?);
 
@@ -69,6 +69,7 @@ impl MasterService {
         });
 
         Ok(MasterService {
+            storage,
             raft,
             partition_lock: RwLock::new(0),
             collection_lock: Mutex::new(0),
@@ -76,10 +77,17 @@ impl MasterService {
     }
 
     pub async fn del_collection(&self, collection_name: &str) -> ASResult<Collection> {
+        self.raft.client_read().await?;
+
+        // self.storage.get()
+
+        collection_key();
+
+
         self.raft
             .client_write(WriteActions {
                 actions: vec![WriteAction {
-                    r#type: write_action::Type::Delete,
+                    r#type: write_action::Type::Delete as i32,
                     kv: Some(Kv {
                         key: collection_name.to_owned().into_bytes(),
                         value: vec![],
