@@ -1,18 +1,20 @@
-pub mod graphql;
+// pub mod graphql;
 pub mod server;
-pub mod storage;
 pub mod service;
+pub mod graphql;
 
 
 pub mod entity_key {
-    const PREFIX_PSERVER: &str = "/META/SERVER";
-    const PREFIX_COLLECTION: &str = "/META/COLLECTION";
-    const PREFIX_PARTITION: &str = "/META/PARTITION";
-    const PREFIX_PSERVER_ID: &str = "/META/SERVER_ID";
+    pub const PREFIX_PSERVER: &str = "/META/SERVER";
+    pub const PREFIX_COLLECTION: &str = "/META/COLLECTION";
+    pub const PREFIX_PARTITION: &str = "/META/PARTITION";
+    pub const PREFIX_PSERVER_ID: &str = "/META/SERVER_ID";
 
     pub const SEQ_COLLECTION: &str = "/META/SEQUENCE/COLLECTION";
     pub const SEQ_PARTITION: &str = "/META/SEQUENCE/PARTITION";
     pub const SEQ_PSERVER: &str = "/META/SEQUENCE/PSERVER";
+
+    pub const COLLECTION_MAPPING: &str = "META/MAPPING/COLLECTION/";
 
     pub fn pserver(addr: &str) -> String {
         format!("{}/{}", PREFIX_PSERVER, addr)
@@ -44,7 +46,6 @@ pub mod entity_key {
 
     /// META_MAPPING_COLLECTION_{collection_name}
     pub fn collection_name(collection_name: &str) -> String {
-        format!("META/MAPPING/COLLECTION/{}", collection_name)
+        format!("{}/{}", COLLECTION_MAPPING, collection_name)
     }
-
 }

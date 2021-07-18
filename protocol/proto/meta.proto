@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+import "raft.proto";
+
+package meta_raft;
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+    raft.RaftMetrics metrics = 1;
+}
+
+message PServer {
+    uint32 id = 1;
+    string rpc_addr = 2;
+    string raft_addr = 3;
+    repeated Partition partitions = 4;
+    string zone = 5;
+    int64 modify_time = 6;
+}
+
+message Collection {
+    enum Type {
+        UNKNOW = 0;
+        CREATING = 1;
+        DROPED = 2;
+        WORKING = 3;
+    }
+    uint32 id = 1;
+    string name = 2;
+    Type type = 3;
+    uint32 partition_num = 4;
+    uint32 partition_replica_num = 5;
+    repeated uint32  partition_ids = 6;
+    repeated Field fields = 7;
+    int64 create_time = 8;
+    int64 modify_time = 9;
+}
+
+message Field {
+    enum Type {
+        UNKNOW = 0;
+        CREATING = 1;
+        DROPED = 2;
+        WORKING = 3;
+    }
+    message Vecotr {
+        enum MetricType {
+            L2 = 0;
+            InnerProduct = 1;
+        }
+        int32 train_size = 1;
+        int32 dimension = 2;
+        MetricType metric_type = 3;
+    }
+    Type type = 1;
+    string name = 2;
+    bool array = 3;
+    bool none = 4;
+    bool sort = 5;
+    Vecotr vector = 6;
+}
+
+message Partition {
+    uint32 id = 1;
+    uint32 collection_id = 2;
+    uint32 leader = 3;
+    repeated uint32 replicas = 4;
+    int64 modify_time = 5;
+}
+
+service MetaRaft {
+    rpc Vote(raft.VoteRequest) returns (raft.VoteResponse) {}
+
+    rpc AppendEntries(raft.AppendEntriesRequest) returns (raft.AppendEntriesResponse) {}
+
+    rpc Metrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+}

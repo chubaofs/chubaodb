@@ -114,21 +114,27 @@ pub fn conver<T, E: std::fmt::Display>(result: Result<T, E>) -> ASResult<T> {
 pub enum Code {
     Success = 200,
     InternalErr = 550,
+    //not found
     DocumentNotFound,
+    CollectionNotFound,
+    PartitionNotFound,
+    ServerNotFound,
+
+    //
+    SequenceNotExpect,
+    SequenceRetryTooMay,
+
     AlreadyExists,
     InvalidErr,
     ParamError,
     EngineNotReady,
     EngineWillClose,
-    RocksDBNotFound,
     VersionErr,
     PServerNotFound,
     CollectionNoIndex,
-    CollectionNotFound,
     PartitionNotLeader,
     PartitionNotInit,
     PartitionLoadErr,
-    PartitionNotFound,
     FieldTypeErr,
     FieldValueErr,
     LockedAlready,
@@ -215,6 +221,10 @@ impl ASError {
     }
 }
 
+impl Error for ASError{
+
+}
+
 impl std::fmt::Display for ASError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -286,6 +296,12 @@ impl From<tonic::Status> for ASError {
 
 impl From<xraft::RaftError> for ASError {
     fn from(e: xraft::RaftError) -> Self {
+        err!(Code::InternalErr, e.to_string())
+    }
+}
+
+impl From<anyhow::Error> for ASError{
+    fn from(e: anyhow::Error) -> Self {
         err!(Code::InternalErr, e.to_string())
     }
 }

@@ -3,80 +3,81 @@ syntax = "proto3";
 package raft;
 
 enum Role {
-  FOLLOWER = 0;
-  CANDIDATE = 1;
-  LEADER = 2;
+    FOLLOWER = 0;
+    CANDIDATE = 1;
+    LEADER = 2;
 }
 
 message RaftMetrics {
-  uint64 id = 1;
-  Role role = 2;
-  uint64 currentTerm = 3;
-  uint64 lastLogIndex = 4;
-  uint64 lastApplied = 5;
-  bool hasLeader = 6;
-  uint64 currentLeader = 7;
+    uint64 id = 1;
+    Role role = 2;
+    uint64 currentTerm = 3;
+    uint64 lastLogIndex = 4;
+    uint64 lastApplied = 5;
+    bool hasLeader = 6;
+    uint64 currentLeader = 7;
 }
 
 message KV {
-  bytes key = 1;
-  bytes value = 2;
+    bytes key = 1;
+    bytes value = 2;
 }
 
 message WriteAction {
-  enum Type {
-    Put = 0;
-    Delete = 1;
-  }
+    enum Type {
+        Put = 0;
+        Delete = 1;
+        Sequence = 2;
+    }
 
-  Type type = 1;
-  KV kv = 2;
+    Type type = 1;
+    KV kv = 2;
 }
 
 message WriteActions {
-  repeated WriteAction actions = 1;
+    repeated WriteAction actions = 1;
 }
 
 enum EntryType {
-  Normal = 0;
-  Blank = 1; // For client read
+    Normal = 0;
+    Blank = 1; // For client read
 }
 
 message Entry {
-  uint64 term = 1;
-  uint64 index = 2;
-  EntryType type = 3;
-  bytes data = 4;
+    uint64 term = 1;
+    uint64 index = 2;
+    EntryType type = 3;
+    bytes data = 4;
 }
 
 message VoteRequest {
-  uint64 term = 1;
-  uint64 candidateId = 2;
-  uint64 lastLogIndex = 3;
-  uint64 lastLogTerm = 4;
+    uint64 term = 1;
+    uint64 candidateId = 2;
+    uint64 lastLogIndex = 3;
+    uint64 lastLogTerm = 4;
 }
 
 message VoteResponse {
-  uint64 term = 1;
-  bool voteGranted = 2;
+    uint64 term = 1;
+    bool voteGranted = 2;
 }
 
 message AppendEntriesRequest {
-  uint64 term = 1;
-  uint64 leaderId = 2;
-  uint64 prevLogIndex = 3;
-  uint64 prevLogTerm = 4;
-  uint64 leader_commit = 5;
-  repeated Entry entries = 6;
+    uint64 term = 1;
+    uint64 leaderId = 2;
+    uint64 prevLogIndex = 3;
+    uint64 prevLogTerm = 4;
+    uint64 leader_commit = 5;
+    repeated Entry entries = 6;
 }
 
 message AppendEntriesResponse {
-  uint64 term = 1;
-  bool success = 2;
+    uint64 term = 1;
+    bool success = 2;
 }
 
 service Raft {
-  rpc vote(VoteRequest) returns (VoteResponse) {}
+    rpc vote(VoteRequest) returns (VoteResponse) {}
 
-  rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
+    rpc appendEntries(AppendEntriesRequest) returns (AppendEntriesResponse) {}
 }

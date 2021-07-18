@@ -1,47 +1,13 @@
-use crate::meta::service::MasterService;
-use crate::util::{config, entity::*, error::*};
+use crate::meta::service::Service;
+use crate::util::{config, error::*};
 use async_graphql::*;
 use serde_json::json;
 use std::sync::Arc;
 use tracing::log::{error, info, warn};
 
 pub type JsonValue = Json<serde_json::Value>;
-pub type MasterSchema = Schema<Query, Mutation, EmptySubscription>;
+pub type MetaSchema = Schema<Query, Mutation, EmptySubscription>;
 
-#[derive(InputObject)]
-pub struct Fields {
-    pub int: Option<Vec<IntField>>,
-    pub float: Option<Vec<FloatField>>,
-    pub string: Option<Vec<StringField>>,
-    pub text: Option<Vec<TextField>>,
-    pub vector: Option<Vec<VectorField>>,
-    pub date: Option<Vec<DateField>>,
-}
-
-impl Fields {
-    fn to_collect(self) -> Vec<Field> {
-        let mut field_vec = vec![];
-        if let Some(arr) = self.int {
-            field_vec.extend(arr.into_iter().map(|v| Field::int(v)));
-        }
-        if let Some(arr) = self.float {
-            field_vec.extend(arr.into_iter().map(|v| Field::float(v)));
-        }
-        if let Some(arr) = self.string {
-            field_vec.extend(arr.into_iter().map(|v| Field::string(v)));
-        }
-        if let Some(arr) = self.text {
-            field_vec.extend(arr.into_iter().map(|v| Field::text(v)));
-        }
-        if let Some(arr) = self.vector {
-            field_vec.extend(arr.into_iter().map(|v| Field::vector(v)));
-        }
-        if let Some(arr) = self.date {
-            field_vec.extend(arr.into_iter().map(|v| Field::date(v)));
-        }
-        field_vec
-    }
-}
 
 pub struct Mutation;
 
@@ -100,128 +66,77 @@ impl Mutation {
         // Ok(Json(serde_json::to_value(ps)?))
     }
 
-    async fn collection_create(
-        &self,
-        ctx: &Context<'_>,
-        name: String,
-        partition_num: i32,
-        partition_replica_num: i32,
-        fields: Option<Fields>,
-    ) -> Result<JsonValue> {
-        panic!()
-        // let mut fs = vec![];
-        // if fields.is_some() {
-        // 	fs = fields.unwrap().to_collect();
-        // }
-        //
-        // let info = Collection {
-        // 	id: 0,
-        // 	name: name,
-        // 	fields: fs,
-        // 	partition_num: partition_num as u32,
-        // 	partition_replica_num: partition_replica_num as u32,
-        // 	status: CollectionStatus::UNKNOW,
-        // 	..Default::default()
-        // };
-        //
-        // let v = serde_json::to_string(&info)?;
-        // info!("create collection:[{}]", v);
-        //
-        // let name = info.name.clone();
-        // info!("prepare to create collection with name {}", name);
-        // match ctx
-        // 	.data_unchecked::<Arc<MasterService>>()
-        // 	.create_collection(info)
-        // 	.await
-        // {
-        // 	Err(e) => {
-        // 		error!(
-        // 			"create collection failed, collection_name: {}, err: {}",
-        // 			name, e
-        // 		);
-        // 		return result_def!("create collection failed, collection_name: {}, err: {}",name, e);
-        // 	}
-        // 	Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
-        // }
-    }
+    // async fn collection_create(
+    //     &self,
+    //     ctx: &Context<'_>,
+    //     name: String,
+    //     partition_num: i32,
+    //     partition_replica_num: i32,
+    //     fields: Option<Fields>,
+    // ) -> Result<JsonValue> {
+    //     panic!()
+    // let mut fs = vec![];
+    // if fields.is_some() {
+    // 	fs = fields.unwrap().to_collect();
+    // }
+    //
+    // let info = Collection {
+    // 	id: 0,
+    // 	name: name,
+    // 	fields: fs,
+    // 	partition_num: partition_num as u32,
+    // 	partition_replica_num: partition_replica_num as u32,
+    // 	status: CollectionStatus::UNKNOW,
+    // 	..Default::default()
+    // };
+    //
+    // let v = serde_json::to_string(&info)?;
+    // info!("create collection:[{}]", v);
+    //
+    // let name = info.name.clone();
+    // info!("prepare to create collection with name {}", name);
+    // match ctx
+    // 	.data_unchecked::<Arc<MasterService>>()
+    // 	.create_collection(info)
+    // 	.await
+    // {
+    // 	Err(e) => {
+    // 		error!(
+    // 			"create collection failed, collection_name: {}, err: {}",
+    // 			name, e
+    // 		);
+    // 		return result_def!("create collection failed, collection_name: {}, err: {}",name, e);
+    // 	}
+    // 	Ok(s) => return Ok(Json(serde_json::to_value(s)?)),
+    // }
+    // }
 
-    async fn collection_hibernate(
-        &self,
-        ctx: &Context<'_>,
-        name: String,
-    ) -> FieldResult<JsonValue> {
-        panic!()
-        // info!("prepare to delete collection name {}", name);
-        //
-        // match ctx
-        // 	.data_unchecked::<Arc<MasterService>>()
-        // 	.hibernate_collection(&name)
-        // 	.await
-        // {
-        // 	Ok(s) => Ok(Json(json!({
-        //         "success":true,
-        //         "collection":s
-        //     }))),
-        // 	Err(e) => {
-        // 		error!(
-        // 			"delete collection failed, collection_name {}, err: {}",
-        // 			name,
-        // 			e.to_string()
-        // 		);
-        // 		result_def!("delete collection failed, collection_name: {}, err: {}",name, e)
-        // 	}
-        // }
-    }
 
-    async fn collection_delete(&self, ctx: &Context<'_>, name: String) -> Result<JsonValue> {
-        panic!()
-        // info!("prepare to delete collection name {}", name);
-        //
-        // match ctx
-        // 	.data_unchecked::<Arc<MasterService>>()
-        // 	.del_collection(&name)
-        // 	.await
-        // {
-        // 	Ok(s) => Ok(Json(json!({
-        //         "success":true,
-        //         "collection":s
-        //     }))),
-        // 	Err(e) => {
-        // 		error!(
-        // 			"delete collection failed, collection_name {}, err: {}",
-        // 			name,
-        // 			e.to_string()
-        // 		);
-        // 		result_def!("delete collection failed, collection_name: {}, err: {}",name, e)
-        // 	}
-        // }
-    }
-
-    async fn pserver_update(&self, ctx: &Context<'_>, json: JsonValue) -> Result<JsonValue> {
-        panic!()
-        // let info: PServer = serde_json::from_value(json.0)?;
-        // info!(
-        // 	"prepare to update pserver with address {}, zone {}",
-        // 	info.addr, info.zone
-        // );
-        // match ctx
-        // 	.data_unchecked::<Arc<MasterService>>()
-        // 	.update_server(info)
-        // 	.await
-        // {
-        // 	Ok(s) => {
-        // 		println!(
-        // 			"{}",
-        // 			serde_json::to_string_pretty(&serde_json::to_value(s.clone()).unwrap())
-        // 				.unwrap()
-        // 		);
-        // 		return Ok(Json(serde_json::to_value(s)?));
-        // 	}
-        // 	Err(e) => {
-        // 		return result_def!("update server failed, err: {}", e.to_string());
-        // 	}
-        // }
-    }
+    // async fn pserver_update(&self, ctx: &Context<'_>, json: JsonValue) -> Result<JsonValue> {
+    //     panic!()
+    // let info: PServer = serde_json::from_value(json.0)?;
+    // info!(
+    // 	"prepare to update pserver with address {}, zone {}",
+    // 	info.addr, info.zone
+    // );
+    // match ctx
+    // 	.data_unchecked::<Arc<MasterService>>()
+    // 	.update_server(info)
+    // 	.await
+    // {
+    // 	Ok(s) => {
+    // 		println!(
+    // 			"{}",
+    // 			serde_json::to_string_pretty(&serde_json::to_value(s.clone()).unwrap())
+    // 				.unwrap()
+    // 		);
+    // 		return Ok(Json(serde_json::to_value(s)?));
+    // 	}
+    // 	Err(e) => {
+    // 		return result_def!("update server failed, err: {}", e.to_string());
+    // 	}
+    // }
+    // }
 
     async fn partition_update(&self, ctx: &Context<'_>, json: JsonValue) -> Result<JsonValue> {
         panic!()
@@ -252,11 +167,8 @@ pub struct Query;
 #[Object]
 impl Query {
     async fn collection_list(&self, ctx: &Context<'_>) -> FieldResult<JsonValue> {
-        return Ok(Json(serde_json::to_value(
-            ctx.data_unchecked::<Arc<MasterService>>()
-                .list_collections()
-                .await?,
-        )?));
+        let json = ctx.data_unchecked::<Arc<Service>>().list_collections().map_or_else(|e| e.to_json(), |v| serde_json::to_value(v).unwrap());
+        Ok(Json(json))
     }
 
     async fn collection_get(
@@ -312,19 +224,20 @@ impl Query {
 
     async fn version(&self) -> JsonValue {
         Json(serde_json::json!({
-            "chubaodb":"master runing",
+            "chubaodb":"meta runing",
             "version":config::VERSION,
             "git_version": config::GIT_VERSION,
         }))
     }
 
     async fn pserver_list(&self, ctx: &Context<'_>) -> FieldResult<JsonValue> {
-        Ok(Json(serde_json::to_value(
-            ctx.data_unchecked::<Arc<MasterService>>()
-                .list_servers()
-                .await
-                .unwrap(),
-        )?))
+        // Ok(Json(serde_json::to_value(
+        //     ctx.data_unchecked::<Arc<Service>>()
+        //         .list_servers()
+        //         .await
+        //         .unwrap(),
+        // )?))
+        panic!()
     }
 
     async fn pserver_get(&self, ctx: &Context<'_>, id: u32) -> FieldResult<JsonValue> {

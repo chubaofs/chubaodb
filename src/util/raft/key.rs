@@ -1,3 +1,4 @@
+
 use alaya_protocol::raft::Entry as RaftEntry;
 use byteorder::{WriteBytesExt, BE};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

@@ -8,7 +8,7 @@ fn main() {
         .compile(
             &[
                 "proto/raft.proto",
-                "proto/meta_raft.proto",
+                "proto/meta.proto",
                 "proto/pserver.proto",
             ],
             &["proto"],

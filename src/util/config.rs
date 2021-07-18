@@ -41,7 +41,7 @@ pub struct Config {
     pub global: Global,
     pub router: Router,
     pub ps: PS,
-    pub masters: Vec<Master>,
+    pub metas: Vec<Meta>,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -73,7 +73,7 @@ pub struct Router {
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct PS {
-    // id value not need set in config, It will be assigned by the master
+    // id value not need set in config, It will be assigned by the meta
     pub id: Option<u64>,
     pub zone: String,
     pub data: String,
@@ -96,7 +96,7 @@ pub struct RaftConf {
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct Master {
+pub struct Meta {
     pub node_id: u64,
     pub ip: String,
     pub http_port: u16,
@@ -111,14 +111,14 @@ impl Config {
     fn init(&mut self) {
         if self.global.ip == "" {
             let my = MyIp::instance().unwrap();
-            for m in self.masters.iter_mut() {
+            for m in self.metas.iter_mut() {
                 if my.is_my_ip(m.ip.as_str()) {
                     m.is_self = true;
                     break;
                 }
             }
         } else {
-            for m in self.masters.iter_mut() {
+            for m in self.metas.iter_mut() {
                 if m.ip.as_str() == self.global.ip.as_str() {
                     m.is_self = true;
                     break;
@@ -190,8 +190,8 @@ impl Config {
         info!("log init ok ");
     }
 
-    pub fn self_master(&self) -> Option<&Master> {
-        for m in self.masters.iter() {
+    pub fn self_leader(&self) -> Option<&Meta> {
+        for m in self.metas.iter() {
             if m.is_self {
                 return Some(m);
             }
@@ -199,14 +199,14 @@ impl Config {
         None
     }
 
-    pub fn master_addr(&self) -> String {
-        return format!("{}:{}", self.masters[0].ip, self.masters[0].http_port);
+    pub fn meta_addr(&self) -> String {
+        return format!("{}:{}", self.metas[0].ip, self.metas[0].http_port);
     }
 
-    pub fn master_http_addr(&self) -> String {
+    pub fn meta_http_addr(&self) -> String {
         format!(
             "http://{}:{}",
-            self.masters[0].ip, self.masters[0].http_port
+            self.metas[0].ip, self.metas[0].http_port
         )
     }
 }
@@ -246,7 +246,7 @@ fn _load_config(conf_path: &str, ip: Option<&str>) -> Config {
                 },
             },
             router: Router { http_port: 8080 },
-            masters: vec![Master {
+            metas: vec![Meta {
                 node_id: 1,
                 ip: String::from("127.0.0.1"),
                 http_port: 7070,
@@ -295,5 +295,5 @@ fn false_bool() -> bool {
 #[test]
 fn test_load_config() {
     let config = load_config("config/config.toml", None);
-    assert_eq!(1, config.self_master().unwrap().node_id);
+    assert_eq!(1, config.self_leader().unwrap().node_id);
 }

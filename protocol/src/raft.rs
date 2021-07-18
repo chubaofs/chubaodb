@@ -54,6 +54,7 @@ pub mod write_action {
     pub enum Type {
         Put = 0,
         Delete = 1,
+        Sequence = 2,
     }
 }
 #[derive(

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
-use chubaodb::{meta, router, util};
+use chubaodb::{meta,  util};
 use clap::{App, Arg, SubCommand};
 use core::panic;
 use std::sync::{mpsc::channel, Arc};
@@ -41,7 +41,7 @@ fn main() {
                 ),
         )
         .subcommand(
-            SubCommand::with_name("master")
+            SubCommand::with_name("meta")
                 .arg(
                     Arg::with_name("ip")
                         .short("i")
@@ -104,7 +104,7 @@ fn main() {
     let (tx, rx) = channel::<String>();
 
     match subcommand {
-        "master" => {
+        "meta" => {
             let arc = arc_conf.clone();
             let tx_clone = tx.clone();
             thread::spawn(|| {
@@ -127,11 +127,11 @@ fn main() {
             // });
         }
         "all" => {
-            // let arc = arc_conf.clone();
-            // let tx_clone = tx.clone();
-            // thread::spawn(|| {
-            //     let _ = meta::server::start(tx_clone, arc);
-            // });
+            let arc = arc_conf.clone();
+            let tx_clone = tx.clone();
+            thread::spawn(|| {
+                let _ = meta::server::start(tx_clone, arc);
+            });
 
             // let arc = arc_conf.clone();
             // let tx_clone = tx.clone();
